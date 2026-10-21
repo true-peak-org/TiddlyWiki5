@@ -1,0 +1,55 @@
+title: $:/plugins/tiddlywiki/hive/readme
+
+! Hive storage plugin
+
+Saves a wiki to [[https://hive.blog|Hive]] as a single post with one reply per tiddler, and loads it back again.
+
+!! Requirements
+
+* The [[https://github.com/hivewallet/hive-keychain|Hive Keychain]] browser extension, which signs the transactions. The plugin never has access to your keys.
+* A Hive account with enough Hive Power to publish posts.
+
+!! How it works
+
+The wiki is published as:
+
+* one ''root post'' in the configured category, whose body is an index of the wiki and whose metadata holds the identifier of the wiki;
+* one ''reply'' per published tiddler, nested underneath the root post (or underneath the reply of its parent tiddler when the nesting is set to ''path'').
+
+The canonical text of a tiddler is stored in the `tw5` metadata of its reply, so nothing is lost by the conversion to markdown. The body of each reply holds a markdown rendering of the tiddler, prefixed with a note that the post is part of a wiki. That way the wiki stays readable in a plain markdown viewer, while a TiddlyWiki5 reader recovers the exact original tiddler, including its custom fields and tags.
+
+Permlinks are derived from the identifier of the wiki and the title of the tiddler, so they are stable: saving the wiki again updates the existing posts instead of creating new ones. Tiddlers that are removed from the wiki are marked as removed in their reply rather than being deleted, so that the replies of other authors keep working.
+
+!! Publishing
+
+Publishing is always explicit. Nothing is sent to the blockchain until the ''Save to Hive'' button in the control panel is pressed. The plugin first reads the current replies of the root post, compares them with the local tiddlers, and then broadcasts only the operations that are needed.
+
+!! Loading
+
+Loading reads the root post and all of its replies, and then adds the tiddlers to the wiki. The permlink of the root post is remembered by the plugin, so the wiki can be loaded again with a single click. It can also be given explicitly in the control panel, or with the `permlink` attribute of the action widget.
+
+!! Action widgets
+
+* `<$button><$action-hivesave/>Save to Hive</$button>` saves the wiki to Hive.
+* `<$button><$action-hiveload permlink="tw5-my-wiki-0123456789abcdef"/>Load from Hive</$button>` loads the wiki from Hive.
+
+!! Testing the plugin locally
+
+The `hive` edition of the TiddlyWiki5 repository is a minimal wiki that contains the plugin. Start it with:
+
+```
+node ./tiddlywiki.js ./editions/hive --listen port=8080
+```
+
+Then open `http://localhost:8080` in a browser that has the Hive Keychain extension installed. The extension has to be allowed to run on the page, which Chrome asks for the first time the extension is used on a site. A single file wiki can also be built with `node ./tiddlywiki.js ./editions/hive --build index`, but then the browser needs to be given permission to run extensions on file urls.
+
+!! Settings
+
+|!Setting |!Default |!Description |
+|Account | |The Hive account that publishes the wiki |
+|Endpoint |`https://api.hive.blog` |The JSON-RPC endpoint of the Hive blockchain |
+|Category |`tiddlywiki5` |The category of the root post |
+|Nesting |`path` |Whether the replies are nested by the path of the tiddler titles, or all directly underneath the root post |
+|Published tiddlers |`[is[tiddler]] -[prefix[$:/]] +[sort[title]]` |The filter that selects the tiddlers that are published |
+|Front end |`https://hive.blog` |The base url of the Hive front end, used to build the links |
+|Pull mode |`overwrite` |Whether loading overwrites the existing tiddlers, or only adds the ones that are missing |

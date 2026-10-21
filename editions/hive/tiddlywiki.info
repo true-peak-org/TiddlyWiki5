@@ -1,0 +1,17 @@
+{
+	"description": "A minimal wiki for testing the Hive plugin",
+	"plugins": [
+		"tiddlywiki/hive",
+		"tiddlywiki/tiddlyweb",
+		"tiddlywiki/filesystem"
+	],
+	"themes": [
+		"tiddlywiki/vanilla",
+		"tiddlywiki/snowwhite"
+	],
+	"build": {
+		"index": [
+			"--render","$:/core/save/all","hive.html","text/plain"
+		]
+	}
+}

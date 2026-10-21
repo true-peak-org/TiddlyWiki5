@@ -1,0 +1,34 @@
+title: $:/plugins/tiddlywiki/hive/controlpanel
+caption: Hive
+tags: $:/tags/ControlPanel
+
+! Hive
+
+Save this wiki to [[https://hive.blog|Hive]] as a post with one reply per tiddler, and load it back again.
+
+Publishing is always explicit: nothing is sent to the blockchain until you press the ''Save to Hive'' button. The [[https://github.com/hivewallet/hive-keychain|Hive Keychain]] browser extension is used to sign the transactions.
+
+|!Setting |!Value |
+|Account |<$edit-text tiddler="$:/config/tiddlywiki/hive/account" tag="input" default="" placeholder="your Hive account name"/> |
+|Endpoint |<$edit-text tiddler="$:/config/tiddlywiki/hive/rpc" tag="input" default="https://api.hive.blog"/> |
+|Category |<$edit-text tiddler="$:/config/tiddlywiki/hive/category" tag="input" default="tiddlywiki5"/> |
+|Nesting |<$select tiddler="$:/config/tiddlywiki/hive/nesting" default="path"><option value="path">Nested by title path</option><option value="flat">Flat</option></$select> |
+|Published tiddlers |<$edit-text tiddler="$:/config/tiddlywiki/hive/publish-filter" tag="input" default="[is[tiddler]] -[prefix[$:/]] +[sort[title]]"/> |
+|Front end |<$edit-text tiddler="$:/config/tiddlywiki/hive/front-end" tag="input" default="https://hive.blog"/> |
+|Pull mode |<$select tiddler="$:/config/tiddlywiki/hive/pull-mode" default="overwrite"><option value="overwrite">Overwrite existing tiddlers</option><option value="merge">Only add missing tiddlers</option></$select> |
+
+!! Publish
+
+<$button><$action-hivesave/> Save to Hive</$button>
+
+!! Load
+
+<$edit-text tiddler="$:/config/tiddlywiki/hive/permalink" tag="input" default="" placeholder="permlink of the root post, eg tw5-my-wiki-0123456789abcdef"/>
+
+<$button><$action-hiveload/> Load from Hive</$button>
+
+''Status:'' <$list filter="[[$:/state/tiddlywiki/hive/status]get[text]]" variable="ignore"><$text text=<<ignore>>/></$list>
+
+''Last save:'' <$view tiddler="$:/config/tiddlywiki/hive/remote" field="saved"/>
+
+''Post:'' <$view tiddler="$:/config/tiddlywiki/hive/remote" field="url"/>

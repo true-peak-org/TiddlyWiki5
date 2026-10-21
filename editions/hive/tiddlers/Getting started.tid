@@ -1,0 +1,21 @@
+title: Getting started with the Hive plugin
+
+This is a minimal wiki for testing the Hive storage plugin.
+
+! Testing the plugin
+
+# Install the [[https://github.com/hivewallet/hive-keychain|Hive Keychain]] browser extension.
+# Open the ''Control Panel'' and go to the ''Hive'' tab.
+# Enter your Hive account name and press ''Save to Hive''.
+# The Keychain extension asks you to sign the transaction. Nothing is sent to the blockchain before you sign it.
+# Open the URL that is shown in the ''Post'' field to see the result on Hive.
+
+! The tiddlers of this wiki
+
+The tiddlers of this wiki are published as one reply each, underneath the root post of the wiki. The tiddler ''Parent/Child'' is nested underneath the reply of ''Parent''.
+
+! Notes
+
+* Publishing is always explicit: nothing is sent to the blockchain until you press the ''Save to Hive'' button.
+* The canonical text of a tiddler is stored in the metadata of its reply, so the wiki is restored exactly as it was.
+* Use the ''Load from Hive'' button to read the wiki back into this wiki. Set the ''Pull mode'' to ''Only add missing tiddlers'' if you want to keep the tiddlers that are already here.
