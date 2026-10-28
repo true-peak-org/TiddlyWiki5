@@ -13,12 +13,8 @@ Saves a wiki to [[https://hive.blog|Hive]] as a single post with one reply per t
 
 The wiki is published as:
 
-* one ''root post'' in the configured category, whose body is an index of the wiki and whose metadata holds the identifier of the wiki;
-* one ''reply'' per published tiddler, nested underneath the root post (or underneath the reply of its parent tiddler when the nesting is set to ''path'').
-
-The canonical text of a tiddler is stored in the `tw5` metadata of its reply, so nothing is lost by the conversion to markdown. The body of each reply holds a markdown rendering of the tiddler, prefixed with a note that the post is part of a wiki. That way the wiki stays readable in a plain markdown viewer, while a TiddlyWiki5 reader recovers the exact original tiddler, including its custom fields and tags.
-
-Permlinks are derived from the identifier of the wiki and the title of the tiddler, so they are stable: saving the wiki again updates the existing posts instead of creating new ones. Tiddlers that are removed from the wiki are marked as removed in their reply rather than being deleted, so that the replies of other authors keep working.
+* one ''root post'' in the configured category — this is the wiki's Hive presence (the entry point). The standalone app (loaded via the hive-shim) should read this root post and load all tiddlers from its replies. The root post body is a readable index; the canonical wiki metadata is in `json_metadata.tw5`.
+* one ''reply'' per published tiddler, nested underneath the root post (or underneath the reply of its parent tiddler when the nesting is set to ''path''). The HTML app shell does not need to be rewritten to update tiddlers — only replies are added/updated/marked removed. The root post may reference the app URL via the ''App URL'' setting.
 
 !! Publishing
 

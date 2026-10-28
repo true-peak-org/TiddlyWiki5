@@ -563,7 +563,7 @@ Build the list of operations that have to be broadcast
 				author: config.account,
 				permlink: rootPermlink,
 				title: util.makeTitle(wikiTitle),
-				body: util.makeRootBody(root,{frontEnd: config.frontEnd}),
+				body: util.makeRootBody(root,{frontEnd: config.frontEnd, appUrl: this.getConfigText("app-url","")}),
 				json_metadata: JSON.stringify({app: "tw5",tw5: root})
 			});
 		}

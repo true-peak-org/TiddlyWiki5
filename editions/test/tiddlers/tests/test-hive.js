@@ -26,8 +26,8 @@ Tests for the Hive storage plugin.
 			});
 
 			it("should slugify titles", function() {
-				expect(util.slugify("Hello There")).toBe("Hello-There");
-				expect(util.slugify("A/B/C")).toBe("A-B-C");
+				expect(util.slugify("Hello There")).toBe("hello-there");
+				expect(util.slugify("A/B/C")).toBe("a-b-c");
 				expect(util.slugify("  spaced  ")).toBe("spaced");
 			});
 
@@ -36,7 +36,7 @@ Tests for the Hive storage plugin.
 				expect(permlink).toBe(util.getTiddlerPermlink("wikiid","HelloThere"));
 				expect(permlink).not.toBe(util.getTiddlerPermlink("otherwiki","HelloThere"));
 				expect(permlink).not.toBe(util.getTiddlerPermlink("wikiid","HelloThere!"));
-				expect(permlink.indexOf("tw5-HelloThere-")).toBe(0);
+				expect(permlink.indexOf("tw5-hellothere-")).toBe(0);
 			});
 
 			it("should generate a stable permlink for the root post", function() {
@@ -84,9 +84,9 @@ Tests for the Hive storage plugin.
 
 			it("should resolve the links of a tiddler to the urls of the replies", function() {
 				var markdown = util.wikitextToMarkdown("See [[Other]]",function(title) {
-					return title === "Other" ? "https://hive.blog/@me/tw5-Other-1234" : null;
+					return title === "Other" ? "https://hive.blog/@me/tw5-other-1234" : null;
 				});
-				expect(markdown).toBe("See [Other](https://hive.blog/@me/tw5-Other-1234)");
+				expect(markdown).toBe("See [Other](https://hive.blog/@me/tw5-other-1234)");
 			});
 
 			it("should convert a code block into a fenced code block", function() {
@@ -95,9 +95,9 @@ Tests for the Hive storage plugin.
 
 			it("should not confuse the urls of the links with the italic markup", function() {
 				var markdown = util.wikitextToMarkdown("A [[One]] and a [[Two|https://example.com]]",function(title) {
-					return title === "One" ? "https://hive.blog/@me/tw5-One-1234" : null;
+					return title === "One" ? "https://hive.blog/@me/tw5-one-1234" : null;
 				});
-				expect(markdown).toBe("A [One](https://hive.blog/@me/tw5-One-1234) and a [Two](https://example.com)");
+				expect(markdown).toBe("A [One](https://hive.blog/@me/tw5-one-1234) and a [Two](https://example.com)");
 			});
 
 			it("should make the body of a tiddler", function() {

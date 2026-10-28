@@ -15,6 +15,7 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 |Nesting |<$select tiddler="$:/config/tiddlywiki/hive/nesting" default="path"><option value="path">Nested by title path</option><option value="flat">Flat</option></$select> |
 |Published tiddlers |<$edit-text tiddler="$:/config/tiddlywiki/hive/publish-filter" tag="input" default="[is[tiddler]] -[prefix[$:/]] +[sort[title]]"/> |
 |Front end |<$edit-text tiddler="$:/config/tiddlywiki/hive/front-end" tag="input" default="https://hive.blog"/> |
+|App URL |<$edit-text tiddler="$:/config/tiddlywiki/hive/app-url" tag="input" default="" placeholder="URL of the standalone HTML app that loads from Hive (e.g. via hive-shim)"/> |
 |Pull mode |<$select tiddler="$:/config/tiddlywiki/hive/pull-mode" default="overwrite"><option value="overwrite">Overwrite existing tiddlers</option><option value="merge">Only add missing tiddlers</option></$select> |
 
 !! Publish

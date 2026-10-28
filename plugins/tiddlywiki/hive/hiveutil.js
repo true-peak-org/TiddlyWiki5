@@ -81,7 +81,12 @@ Return a random identifier of 32 hexadecimal characters
 	};
 
 	/*
-Convert a string into something that is safe to use within a permlink
+Convert a string into something that is safe to use within a permlink.
+Hive permlinks are case-sensitive; observed forms are mostly lowercase with
+hyphens. Hyphens are allowed; underscores are less common. We normalise to
+lowercase and use hyphens as word separators, but also encode underscores
+and other punctuation to avoid collisions between different separators and
+cases (e.g. "Sub-Section" vs "Sub_Section" must not map to the same slug).
 */
 	exports.slugify = function(text,maxLength) {
 		var result = "",
@@ -91,14 +96,24 @@ Convert a string into something that is safe to use within a permlink
 		text = String(text);
 		for(i = 0; i < text.length; i++) {
 			charCode = text.charCodeAt(i);
-			if((charCode >= 48 && charCode <= 57) || (charCode >= 65 && charCode <= 90) || (charCode >= 97 && charCode <= 122)) {
+			if(charCode >= 48 && charCode <= 57) { // digits
 				result += text.charAt(i);
-			} else if(charCode === 32 || charCode === 45 || charCode === 95) {
+			} else if(charCode >= 65 && charCode <= 90) { // uppercase
+				result += text.charAt(i).toLowerCase();
+			} else if(charCode >= 97 && charCode <= 122) { // lowercase
+				result += text.charAt(i);
+			} else if(charCode === 32) { // space
 				result += "-";
+			} else if(charCode === 45) { // hyphen
+				result += "-";
+			} else if(charCode === 95) { // underscore - encode to avoid collision with hyphen
+				result += "-u-";
 			} else {
 				result += "-";
 			}
 		}
+		// Collapse multiple hyphens
+		result = result.replace(/-+/g,"-");
 		while(result.length > 1 && result.charAt(result.length - 1) === "-") {
 			result = result.substring(0,result.length - 1);
 		}
@@ -107,6 +122,9 @@ Convert a string into something that is safe to use within a permlink
 		}
 		if(result.length > maxLength) {
 			result = result.substring(0,maxLength);
+		}
+		if(!result) {
+			result = "tiddler";
 		}
 		return result;
 	};
@@ -296,21 +314,24 @@ Convert the inline markup of a single line of wikitext into markdown
 			placeholders.push(value);
 			return "\u0000" + (placeholders.length - 1) + "\u0000";
 		}
-		// Inline code
+		// Inline code (triple braces in TW5) - don't convert to markdown code in a way that breaks things
 		result = result.replace(/\{\{\{([\s\S]*?)\}\}\}/g,function(match,content) {
-			return stash("`" + content + "`");
+			return stash("`" + exports.plainText(content) + "`");
 		});
-		// Links
+		// Links - [[label|target]] and [[target]]
 		result = result.replace(/\[\[([^\]\|]*)\|([^\]]*)\]\]/g,function(match,label,target) {
 			var url = linkResolver ? linkResolver(target) : null;
-			return stash("[" + exports.plainText(label) + "](" + (url || target) + ")");
+			if(url) {
+				return stash("[" + exports.plainText(label) + "](" + url + ")");
+			}
+			return stash("[" + exports.plainText(label) + "](" + target.replace(/\s+/g,"%20") + ")");
 		});
 		result = result.replace(/\[\[([^\]]*)\]\]/g,function(match,target) {
 			var url = linkResolver ? linkResolver(target) : null;
 			if(url) {
 				return stash("[" + exports.plainText(target) + "](" + url + ")");
 			}
-			return stash("<" + target + ">");
+			return stash("[" + exports.plainText(target) + "](" + target.replace(/\s+/g,"%20") + ")");
 		});
 		// Bold and italic
 		result = result.replace(/''(.*?)''/g,"**$1**");
@@ -363,14 +384,19 @@ json_metadata of the post
 	};
 
 	/*
-Return the body of the root post of a wiki, an index of the tiddlers
+Return the body of the root post of a wiki, an index of the tiddlers.
+The root post is the entry point for a Hive wiki presence: the app
+(standalone HTML) can load this post and follow its replies.
 */
 	exports.makeRootBody = function(root,options) {
 		options = options || {};
 		var lines = [],
-			indent = 0;
+			appUrl = options.appUrl || "";
 		lines.push("> **Note:** This post is the root of a wiki published from [TiddlyWiki5](" + (options.frontEnd || "https://tiddlywiki.com") + ").");
 		lines.push("> Each tiddler of the wiki is stored as a reply to this post.");
+		if(appUrl) {
+			lines.push("> Open the app: [" + appUrl + "](" + appUrl + ")");
+		}
 		lines.push("");
 		lines.push("# " + root.wikititle);
 		lines.push("");
@@ -381,7 +407,7 @@ Return the body of the root post of a wiki, an index of the tiddlers
 		lines.push("## Contents");
 		lines.push("");
 		root.index.forEach(function(entry) {
-			lines.push(new Array(indent + 1).join("  ") + "- [" + exports.plainText(entry.title) + "](" + entry.url + ")");
+			lines.push("- [" + exports.plainText(entry.title) + "](" + entry.url + ")");
 		});
 		return lines.join("\n");
 	};
