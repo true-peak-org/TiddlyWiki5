@@ -610,7 +610,7 @@ Return the title of the tiddler that an operation belongs to
 		var permlink = operation.permlink,
 			titles = Object.keys(byTitle);
 		for(var i = 0; i < titles.length; i++) {
-			if(permlink === byTitle[titles[i]].permlink || permlink.indexOf(byTitle[titles[i]].permlink + "-p") === 0) {
+			if(permlink === byTitle[titles[i]].permlink || permlink.indexOf(byTitle[titles[i]].permlink + "_p") === 0) {
 				return titles[i];
 			}
 		}

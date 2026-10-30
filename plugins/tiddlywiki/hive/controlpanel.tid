@@ -24,7 +24,7 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 
 !! Load
 
-<$edit-text tiddler="$:/config/tiddlywiki/hive/permalink" tag="input" default="" placeholder="permlink of the root post, eg tw5-my-wiki-0123456789abcdef"/>
+<$edit-text tiddler="$:/config/tiddlywiki/hive/permalink" tag="input" default="" placeholder="permlink of the root post, eg tw5_my_wiki_0123456789abcdef"/>
 
 <$button><$action-hiveload/> Load from Hive</$button>
 

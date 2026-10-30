@@ -26,8 +26,8 @@ Tests for the Hive storage plugin.
 			});
 
 			it("should slugify titles", function() {
-				expect(util.slugify("Hello There")).toBe("hello-there");
-				expect(util.slugify("A/B/C")).toBe("a-b-c");
+				expect(util.slugify("Hello There")).toBe("hello_there");
+				expect(util.slugify("A/B/C")).toBe("a_b_c");
 				expect(util.slugify("  spaced  ")).toBe("spaced");
 			});
 
@@ -36,7 +36,7 @@ Tests for the Hive storage plugin.
 				expect(permlink).toBe(util.getTiddlerPermlink("wikiid","HelloThere"));
 				expect(permlink).not.toBe(util.getTiddlerPermlink("otherwiki","HelloThere"));
 				expect(permlink).not.toBe(util.getTiddlerPermlink("wikiid","HelloThere!"));
-				expect(permlink.indexOf("tw5-hellothere-")).toBe(0);
+				expect(permlink.indexOf("tw5_hellothere_")).toBe(0);
 			});
 
 			it("should generate a stable permlink for the root post", function() {
@@ -84,9 +84,9 @@ Tests for the Hive storage plugin.
 
 			it("should resolve the links of a tiddler to the urls of the replies", function() {
 				var markdown = util.wikitextToMarkdown("See [[Other]]",function(title) {
-					return title === "Other" ? "https://hive.blog/@me/tw5-other-1234" : null;
+					return title === "Other" ? "https://hive.blog/@me/tw5_other_1234" : null;
 				});
-				expect(markdown).toBe("See [Other](https://hive.blog/@me/tw5-other-1234)");
+				expect(markdown).toBe("See [Other](https://hive.blog/@me/tw5_other_1234)");
 			});
 
 			it("should convert a code block into a fenced code block", function() {
@@ -95,9 +95,9 @@ Tests for the Hive storage plugin.
 
 			it("should not confuse the urls of the links with the italic markup", function() {
 				var markdown = util.wikitextToMarkdown("A [[One]] and a [[Two|https://example.com]]",function(title) {
-					return title === "One" ? "https://hive.blog/@me/tw5-one-1234" : null;
+					return title === "One" ? "https://hive.blog/@me/tw5_one_1234" : null;
 				});
-				expect(markdown).toBe("A [One](https://hive.blog/@me/tw5-one-1234) and a [Two](https://example.com)");
+				expect(markdown).toBe("A [One](https://hive.blog/@me/tw5_one_1234) and a [Two](https://example.com)");
 			});
 
 			it("should make the body of a tiddler", function() {
@@ -160,16 +160,16 @@ Tests for the Hive storage plugin.
 			it("should build the operations for the root post and the tiddlers", function(done) {
 				var store = new HiveStore({wiki: wiki}),
 					config = store.getConfig();
-				store.buildOperations(config,store.getWikiId(),"Test Wiki","tw5-root-1234",null,[],["HelloThere","Parent/Child"],function(err,operations) {
+				store.buildOperations(config,store.getWikiId(),"Test Wiki","tw5_root_1234",null,[],["HelloThere","Parent/Child"],function(err,operations) {
 					expect(err).toBeNull();
 					// The root post comes first
-					expect(operations[0].permlink).toBe("tw5-root-1234");
+					expect(operations[0].permlink).toBe("tw5_root_1234");
 					expect(operations[0].parent_permlink).toBe("tiddlywiki5");
 					expect(operations[0].parent_author).toBe("");
 					// Then the tiddlers
 					expect(operations.length).toBe(3);
 					operations.slice(1).forEach(function(operation) {
-						expect(operation.parent_permlink).toBe("tw5-root-1234");
+						expect(operation.parent_permlink).toBe("tw5_root_1234");
 						expect(operation.type).toBe("comment");
 						var metadata = JSON.parse(operation.json_metadata);
 						expect(metadata.app).toBe("tw5");
@@ -182,7 +182,7 @@ Tests for the Hive storage plugin.
 			it("should not rebuild the operations of the tiddlers that have not changed", function(done) {
 				var store = new HiveStore({wiki: wiki}),
 					config = store.getConfig();
-				store.buildOperations(config,"wikiid","Test Wiki","tw5-root-1234",null,[],["HelloThere"],function(err,operations) {
+				store.buildOperations(config,"wikiid","Test Wiki","tw5_root_1234",null,[],["HelloThere"],function(err,operations) {
 					var reply = {
 						permlink: util.getTiddlerPermlink("wikiid","HelloThere"),
 						json_metadata: JSON.stringify({app: "tw5",tw5: {
@@ -198,10 +198,10 @@ Tests for the Hive storage plugin.
 							hash: util.getPayloadHash({title: "HelloThere",text: "Welcome",fields: {},tags: [],created: "",modified: "",part: 1,parts: 1})
 						}})
 					};
-					store.buildOperations(config,"wikiid","Test Wiki","tw5-root-1234",null,[reply],["HelloThere"],function(err2,operations2) {
+					store.buildOperations(config,"wikiid","Test Wiki","tw5_root_1234",null,[reply],["HelloThere"],function(err2,operations2) {
 						// Only the root post is left
 						expect(operations2.length).toBe(1);
-						expect(operations2[0].permlink).toBe("tw5-root-1234");
+						expect(operations2[0].permlink).toBe("tw5_root_1234");
 						done();
 					});
 				});
@@ -214,7 +214,7 @@ Tests for the Hive storage plugin.
 					permlink: util.getTiddlerPermlink("wikiid","Gone"),
 					json_metadata: JSON.stringify({app: "tw5",tw5: {type: "tiddler",title: "Gone",text: "Old",hash: "abc"}})
 				};
-				store.buildOperations(config,"wikiid","Test Wiki","tw5-root-1234",null,[reply],[],function(err,operations) {
+				store.buildOperations(config,"wikiid","Test Wiki","tw5_root_1234",null,[reply],[],function(err,operations) {
 					var tombstone = operations.filter(function(operation) {
 						return operation.permlink === reply.permlink;
 					});
@@ -227,7 +227,7 @@ Tests for the Hive storage plugin.
 			it("should nest the replies underneath the reply of their parent", function(done) {
 				var store = new HiveStore({wiki: wiki}),
 					config = store.getConfig();
-				store.buildOperations(config,"wikiid","Test Wiki","tw5-root-1234",null,[],["Parent","Parent/Child"],function(err,operations) {
+				store.buildOperations(config,"wikiid","Test Wiki","tw5_root_1234",null,[],["Parent","Parent/Child"],function(err,operations) {
 					var child = operations.filter(function(operation) {
 							return JSON.parse(operation.json_metadata).tw5.title === "Parent/Child";
 						})[0],
@@ -245,13 +245,13 @@ Tests for the Hive storage plugin.
 					hash = util.getPayloadHash({title: "HelloThere",text: "Welcome",fields: {},tags: [],created: "",modified: "",part: 1,parts: 1});
 				wiki.addTiddler(new $tw.Tiddler({title: "$:/config/tiddlywiki/hive/remote",text: JSON.stringify({
 					wikiid: "wikiid",
-					permlink: "tw5-root-1234",
+					permlink: "tw5_root_1234",
 					tiddlers: {HelloThere: {permlink: util.getTiddlerPermlink("wikiid","HelloThere"),hashes: {1: hash}}}
 				})}));
-				store.buildOperations(config,"wikiid","Test Wiki","tw5-root-1234",null,[],["HelloThere"],function(err,operations) {
+				store.buildOperations(config,"wikiid","Test Wiki","tw5_root_1234",null,[],["HelloThere"],function(err,operations) {
 				// Only the root post is left
 					expect(operations.length).toBe(1);
-					expect(operations[0].permlink).toBe("tw5-root-1234");
+					expect(operations[0].permlink).toBe("tw5_root_1234");
 					done();
 				});
 			});
@@ -322,7 +322,7 @@ Tests for the Hive storage plugin.
 				var store = new HiveStore({wiki: wiki}),
 					config = store.getConfig(),
 					replies = [{
-						permlink: "tw5-Loaded-1234",
+						permlink: "tw5_Loaded_1234",
 						json_metadata: JSON.stringify({app: "tw5",tw5: {
 							type: "tiddler",
 							title: "Loaded",
@@ -349,7 +349,7 @@ Tests for the Hive storage plugin.
 					config = store.getConfig();
 				config.pullMode = "merge";
 				var replies = [{
-					permlink: "tw5-HelloThere-1234",
+					permlink: "tw5_HelloThere_1234",
 					json_metadata: JSON.stringify({app: "tw5",tw5: {
 						type: "tiddler",
 						title: "HelloThere",
@@ -371,8 +371,8 @@ Tests for the Hive storage plugin.
 				var store = new HiveStore({wiki: wiki}),
 					config = store.getConfig(),
 					replies = [
-						{permlink: "tw5-Big-1",json_metadata: JSON.stringify({app: "tw5",tw5: {type: "tiddler",title: "Big",text: "one ",fields: {},tags: [],part: 1,parts: 2}})},
-						{permlink: "tw5-Big-2",json_metadata: JSON.stringify({app: "tw5",tw5: {type: "tiddler",title: "Big",text: "two",fields: {},tags: [],part: 2,parts: 2}})}
+						{permlink: "tw5_Big_1",json_metadata: JSON.stringify({app: "tw5",tw5: {type: "tiddler",title: "Big",text: "one ",fields: {},tags: [],part: 1,parts: 2}})},
+						{permlink: "tw5_Big_2",json_metadata: JSON.stringify({app: "tw5",tw5: {type: "tiddler",title: "Big",text: "two",fields: {},tags: [],part: 2,parts: 2}})}
 					];
 				store.applyReplies(config,{type: "root",wikiid: "wikiid"},replies,function(err,summary) {
 					expect(wiki.getTiddler("Big").fields.text).toBe("one two");

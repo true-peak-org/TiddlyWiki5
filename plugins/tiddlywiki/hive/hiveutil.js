@@ -82,11 +82,8 @@ Return a random identifier of 32 hexadecimal characters
 
 	/*
 Convert a string into something that is safe to use within a permlink.
-Hive permlinks are case-sensitive; observed forms are mostly lowercase with
-hyphens. Hyphens are allowed; underscores are less common. We normalise to
-lowercase and use hyphens as word separators, but also encode underscores
-and other punctuation to avoid collisions between different separators and
-cases (e.g. "Sub-Section" vs "Sub_Section" must not map to the same slug).
+Hive does not allow dashes in permlinks, so words are separated by
+underscores. Underscores and hyphens inside the source text are encoded,
 */
 	exports.slugify = function(text,maxLength) {
 		var result = "",
@@ -103,21 +100,21 @@ cases (e.g. "Sub-Section" vs "Sub_Section" must not map to the same slug).
 			} else if(charCode >= 97 && charCode <= 122) { // lowercase
 				result += text.charAt(i);
 			} else if(charCode === 32) { // space
-				result += "-";
-			} else if(charCode === 45) { // hyphen
-				result += "-";
-			} else if(charCode === 95) { // underscore - encode to avoid collision with hyphen
-				result += "-u-";
+				result += "_";
+			} else if(charCode === 45) { // hyphen - encode to avoid collision with the word separator
+				result += "_h";
+			} else if(charCode === 95) { // underscore - encode to avoid collision with the word separator
+				result += "_u";
 			} else {
-				result += "-";
+				result += "_";
 			}
 		}
-		// Collapse multiple hyphens
-		result = result.replace(/-+/g,"-");
-		while(result.length > 1 && result.charAt(result.length - 1) === "-") {
+		// Collapse multiple separators
+		result = result.replace(/_+/g,"_");
+		while(result.length > 1 && result.charAt(result.length - 1) === "_") {
 			result = result.substring(0,result.length - 1);
 		}
-		while(result.length > 1 && result.charAt(0) === "-") {
+		while(result.length > 1 && result.charAt(0) === "_") {
 			result = result.substring(1);
 		}
 		if(result.length > maxLength) {
@@ -133,14 +130,14 @@ cases (e.g. "Sub-Section" vs "Sub_Section" must not map to the same slug).
 Return the permlink used for the root post of a wiki
 */
 	exports.getRootPermlink = function(wikiId,wikiTitle) {
-		return "tw5-" + exports.slugify(wikiTitle || "wiki") + "-" + exports.hashString(wikiId);
+		return "tw5_" + exports.slugify(wikiTitle || "wiki") + "_" + exports.hashString(wikiId);
 	};
 
 	/*
 Return the permlink used for the reply that holds a tiddler
 */
 	exports.getTiddlerPermlink = function(wikiId,title) {
-		return "tw5-" + exports.slugify(title) + "-" + exports.hashString(wikiId + "|" + title);
+		return "tw5_" + exports.slugify(title) + "_" + exports.hashString(wikiId + "|" + title);
 	};
 
 	/*
@@ -148,7 +145,7 @@ Return the permlink used for one part of a tiddler that had to be split
 over several replies
 */
 	exports.getPartPermlink = function(permlink,part) {
-		return permlink + "-p" + part;
+		return permlink + "_p" + part;
 	};
 
 	/*

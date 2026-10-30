@@ -8,7 +8,7 @@ Action widgets that save a wiki to Hive and load a wiki from Hive.
 Usage:
 
 	<$button><$action-hivesave/>Save to Hive</$button>
-	<$button><$action-hiveload permlink="tw5-..."/>Load from Hive</$button>
+	<$button><$action-hiveload permlink="tw5_..."/>Load from Hive</$button>
 
 \*/
 (function(){

@@ -27,7 +27,7 @@ Loading reads the root post and all of its replies, and then adds the tiddlers t
 !! Action widgets
 
 * `<$button><$action-hivesave/>Save to Hive</$button>` saves the wiki to Hive.
-* `<$button><$action-hiveload permlink="tw5-my-wiki-0123456789abcdef"/>Load from Hive</$button>` loads the wiki from Hive.
+* `<$button><$action-hiveload permlink="tw5_my_wiki_0123456789abcdef"/>Load from Hive</$button>` loads the wiki from Hive.
 
 !! Testing the plugin locally
 
