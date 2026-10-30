@@ -238,29 +238,23 @@ Build the hierarchy of the published tiddlers so that replies can be
 nested underneath their parents
 */
 	HiveStore.prototype.buildTree = function(titles,config) {
-		var byTitle = {},
+		var self = this,
+			byTitle = {},
 			nodes = {};
 		titles.forEach(function(title) {
 			byTitle[title] = true;
 			nodes[title] = {title: title,children: [],parent: null,depth: 0};
 		});
-		titles.forEach(function(title) {
-			var parentTitle = null,
-				parts = title.split("/"),
-				index;
-			if(config.nesting === "path") {
-				for(index = 1; index < parts.length; index++) {
-					var candidate = parts.slice(0,index).join("/");
-					if(byTitle[candidate]) {
-						parentTitle = candidate;
-					}
+		if(config.nesting === "path") {
+			titles.forEach(function(title) {
+				var tiddler = self.wiki.getTiddler(title),
+					parentTitle = self.getParentTitle(tiddler,byTitle);
+				if(parentTitle) {
+					nodes[title].parent = nodes[parentTitle];
+					nodes[parentTitle].children.push(nodes[title]);
 				}
-			}
-			if(parentTitle) {
-				nodes[title].parent = nodes[parentTitle];
-				nodes[parentTitle].children.push(nodes[title]);
-			}
-		});
+			});
+		}
 		// Compute the depth of each node
 		function setDepth(node,depth) {
 			node.depth = depth;
@@ -423,21 +417,51 @@ the first save have been indexed
 	};
 
 	/*
+Return the title of the parent tiddler of the given tiddler, or null when
+the tiddler has no parent. The parent is taken from the parent tag of the
+tiddler or from its parent field and falls back to the path of the tiddler
+title
+*/
+	HiveStore.prototype.getParentTitle = function(tiddler,entries) {
+		var tags = [],
+			rawTags = tiddler.fields.tags,
+			parentTitle = null,
+			i, tag, parts, index, candidate;
+		if($tw.utils.isArray(rawTags)) {
+			tags = rawTags.slice(0);
+		} else if(rawTags) {
+			tags = [rawTags];
+		}
+		for(i = 0; i < tags.length; i++) {
+			tag = tags[i];
+			if(entries[tag]) {
+				parentTitle = tag;
+				break;
+			}
+		}
+		if(!parentTitle && tiddler.fields.parent && entries[tiddler.fields.parent]) {
+			parentTitle = tiddler.fields.parent;
+		}
+		if(!parentTitle) {
+			parts = String(tiddler.fields.title || "").split("/");
+			for(index = 1; index < parts.length; index++) {
+				candidate = parts.slice(0,index).join("/");
+				if(entries[candidate]) {
+					parentTitle = candidate;
+				}
+			}
+		}
+		return parentTitle;
+	};
+
+	/*
 Return the permlink of the reply that a tiddler has to be nested underneath
 */
-	HiveStore.prototype.getParentPermlink = function(title,entries,config,rootPermlink) {
+	HiveStore.prototype.getParentPermlink = function(tiddler,entries,config,rootPermlink) {
 		if(config.nesting !== "path") {
 			return rootPermlink;
 		}
-		var parts = title.split("/"),
-			parentTitle = null,
-			index;
-		for(index = 1; index < parts.length; index++) {
-			var candidate = parts.slice(0,index).join("/");
-			if(entries[candidate]) {
-				parentTitle = candidate;
-			}
-		}
+		var parentTitle = this.getParentTitle(tiddler,entries);
 		if(!parentTitle) {
 			return rootPermlink;
 		}
@@ -475,9 +499,10 @@ Build the list of operations that have to be broadcast
 		});
 		// The operations for the tiddlers themselves
 		entryList.forEach(function(entry) {
-			var payload = util.getTiddlerPayload(self.wiki.getTiddler(entry.title)),
+			var tiddler = self.wiki.getTiddler(entry.title),
+				payload = util.getTiddlerPayload(tiddler),
 				parts = self.splitPayload(payload),
-				parentPermlink = self.getParentPermlink(entry.title,entries,config,rootPermlink);
+				parentPermlink = self.getParentPermlink(tiddler,entries,config,rootPermlink);
 			parts.forEach(function(part) {
 				var permlink = part.parts > 1 ? util.getPartPermlink(entry.permlink,part.part) : entry.permlink,
 					existingReply = existing[permlink],

@@ -239,6 +239,23 @@ Tests for the Hive storage plugin.
 				});
 			});
 
+			it("should nest the replies underneath the reply of the parent given as a tag", function(done) {
+				var store = new HiveStore({wiki: wiki}),
+					config = store.getConfig();
+				wiki.addTiddler(new $tw.Tiddler({title: "Child",text: "Nested",tags: ["Parent"]}));
+				store.buildOperations(config,"wikiid","Test Wiki","tw5_root_1234",null,[],["Parent","Child"],function(err,operations) {
+					var child = operations.filter(function(operation) {
+							return JSON.parse(operation.json_metadata).tw5.title === "Child";
+						})[0],
+						parent = operations.filter(function(operation) {
+							return JSON.parse(operation.json_metadata).tw5.title === "Parent";
+						})[0];
+					expect(child.parent_permlink).toBe(parent.permlink);
+					expect(child.permlink).toBe(util.getTiddlerPermlink("wikiid","Child"));
+					done();
+				});
+			});
+
 			it("should not publish the tiddlers that have already been published", function(done) {
 				var store = new HiveStore({wiki: wiki}),
 					config = store.getConfig(),

@@ -14,7 +14,7 @@ Saves a wiki to [[https://hive.blog|Hive]] as a single post with one reply per t
 The wiki is published as:
 
 * one ''root post'' in the configured category — this is the wiki's Hive presence (the entry point). The standalone app (loaded via the hive-shim) should read this root post and load all tiddlers from its replies. The root post body is a readable index; the canonical wiki metadata is in `json_metadata.tw5`.
-* one ''reply'' per published tiddler, nested underneath the root post (or underneath the reply of its parent tiddler when the nesting is set to ''path''). The HTML app shell does not need to be rewritten to update tiddlers — only replies are added/updated/marked removed. The root post may reference the app URL via the ''App URL'' setting.
+* one ''reply'' per published tiddler, nested underneath the root post (or underneath the reply of its parent tiddler when the parent is given as a tag or when the nesting is set to ''path''). The HTML app shell does not need to be rewritten to update tiddlers — only replies are added/updated/marked removed. The root post may reference the app URL via the ''App URL'' setting.
 
 !! Publishing
 
@@ -45,7 +45,7 @@ Then open `http://localhost:8080` in a browser that has the Hive Keychain extens
 |Account | |The Hive account that publishes the wiki |
 |Endpoint |`https://api.hive.blog` |The JSON-RPC endpoint of the Hive blockchain |
 |Category |`tiddlywiki5` |The category of the root post |
-|Nesting |`path` |Whether the replies are nested by the path of the tiddler titles, or all directly underneath the root post |
+|Nesting |`path` |Whether the replies are nested by the parent tag of the tiddlers, or all directly underneath the root post |
 |Published tiddlers |`[is[tiddler]] -[prefix[$:/]] +[sort[title]]` |The filter that selects the tiddlers that are published |
 |Front end |`https://hive.blog` |The base url of the Hive front end, used to build the links |
 |Pull mode |`overwrite` |Whether loading overwrites the existing tiddlers, or only adds the ones that are missing |
