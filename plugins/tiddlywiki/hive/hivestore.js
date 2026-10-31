@@ -144,6 +144,14 @@ Update the status tiddler that is shown in the control panel
 	};
 
 	/*
+Return the list of tiddlers that exceeded the size limits of a Hive post
+during the build of the operations of the last save
+*/
+	HiveStore.prototype.getOverLimitTiddlers = function() {
+		return this.overLimitTitles || [];
+	};
+
+	/*
 Return the permlink of the root post of this wiki
 */
 	HiveStore.prototype.getRootPermlink = function(wikiId,wikiTitle) {
@@ -381,8 +389,14 @@ Save the wiki to Hive. The callback is invoked with (err,result)
 						state.saved = $tw.utils.stringifyDate(new Date());
 						state.tiddlers = self.getPublishedTiddlers(wikiId,titles);
 						self.setRemoteState(state);
-						self.setStatus("Saved " + operations.length + " operation(s) to " + self.getUrl(config,rootPermlink));
-						callback(null,{permlink: rootPermlink,operations: operations.length,results: results});
+						var statusText = "Saved " + operations.length + " operation(s) to " + self.getUrl(config,rootPermlink);
+						var overLimit = self.getOverLimitTiddlers() || [];
+						if(overLimit.length) {
+							// Warn about the tiddlers that would exceed the limits of a Hive post
+							statusText += " The following tiddler(s) exceeded the limits of a Hive post and were truncated: " + overLimit.join(", ");
+						}
+						self.setStatus(statusText);
+						callback(null,{permlink: rootPermlink,operations: operations.length,results: results,warnings: overLimit});
 					});
 				});
 			});
@@ -478,7 +492,8 @@ Build the list of operations that have to be broadcast
 			existing = {},
 			index = {},
 			state = this.getRemoteState() || {},
-			published = state.tiddlers || {};
+			published = state.tiddlers || {},
+			overLimit = [];
 		(replies || []).forEach(function(reply) {
 			existing[reply.permlink] = reply;
 		});
@@ -503,6 +518,18 @@ Build the list of operations that have to be broadcast
 				payload = util.getTiddlerPayload(tiddler),
 				parts = self.splitPayload(payload),
 				parentPermlink = self.getParentPermlink(tiddler,entries,config,rootPermlink);
+			if(JSON.stringify({app: "tw5",tw5: payload}).length > MAX_METADATA_LENGTH) {
+				// The metadata of this tiddler would exceed the limit of a Hive post
+				if(overLimit.indexOf(entry.title) === -1) {
+					overLimit.push(entry.title);
+				}
+			}
+			if(String(payload.text || "").length > util.MAX_BODY_LENGTH) {
+				// The body of this tiddler would exceed the limit of a Hive post
+				if(overLimit.indexOf(entry.title) === -1) {
+					overLimit.push(entry.title);
+				}
+			}
 			parts.forEach(function(part) {
 				var permlink = part.parts > 1 ? util.getPartPermlink(entry.permlink,part.part) : entry.permlink,
 					existingReply = existing[permlink],
@@ -522,6 +549,12 @@ Build the list of operations that have to be broadcast
 						return;
 					}
 				}
+				var body = util.makeTiddlerBody(part,{
+						frontEnd: config.frontEnd,
+						linkResolver: self.makeLinkResolver(config,entryList,wikiId),
+						tiddler: tiddler
+					}),
+					metadataText = JSON.stringify(metadata);
 				operations.push({
 					type: "comment",
 					parent_author: config.account,
@@ -529,12 +562,16 @@ Build the list of operations that have to be broadcast
 					author: config.account,
 					permlink: permlink,
 					title: util.makeTitle(entry.title + (part.parts > 1 ? " (" + part.part + "/" + part.parts + ")" : "")),
-					body: util.makeTiddlerBody(part,{
-						frontEnd: config.frontEnd,
-						linkResolver: self.makeLinkResolver(config,entryList,wikiId)
-					}),
-					json_metadata: JSON.stringify(metadata)
+					body: body,
+					json_metadata: metadataText
 				});
+				if(body.length > util.MAX_BODY_LENGTH || metadataText.length > MAX_METADATA_LENGTH) {
+					// The operation would exceed the limits of a Hive post, the
+					// tiddler is reported as over the limit
+					if(overLimit.indexOf(entry.title) === -1) {
+						overLimit.push(entry.title);
+					}
+				}
 			});
 		});
 		// The operations for the tiddlers that have been deleted
@@ -625,6 +662,7 @@ Build the list of operations that have to be broadcast
 			return aIndex - bIndex;
 		});
 		ordered = rootOperation ? [rootOperation].concat(tiddlerOperations) : tiddlerOperations;
+		self.overLimitTitles = overLimit;
 		callback(null,ordered);
 	};
 

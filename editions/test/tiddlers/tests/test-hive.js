@@ -107,6 +107,13 @@ Tests for the Hive storage plugin.
 				expect(body.indexOf("TiddlyWiki5")).toBeGreaterThan(-1);
 			});
 
+			it("should not include the image data of a binary tiddler in the body", function() {
+				var wiki = new $tw.Wiki();
+				wiki.addTiddler(new $tw.Tiddler({title: "Image",type: "image/png",text: "iVBORw0KGgoAAAANSUhEUg=="}));
+				var body = util.makeTiddlerBody(util.getTiddlerPayload(wiki.getTiddler("Image")),{frontEnd: "https://hive.blog",tiddler: wiki.getTiddler("Image")});
+				expect(body).not.toContain("iVBORw0KGgo");
+			});
+
 			it("should truncate long titles", function() {
 				var title = util.makeTitle(new Array(500).join("a"));
 				expect(title.length).toBeLessThan(util.MAX_TITLE_LENGTH + 1);
@@ -175,6 +182,17 @@ Tests for the Hive storage plugin.
 						expect(metadata.app).toBe("tw5");
 						expect(metadata.tw5.title).toBeDefined();
 					});
+					done();
+				});
+			});
+
+			it("should report the tiddlers that exceed the hive post limit", function(done) {
+				var store = new HiveStore({wiki: wiki}),
+					config = store.getConfig();
+				wiki.addTiddler(new $tw.Tiddler({title: "Long",text: "x",big: new Array(70000).join("a")}));
+				store.buildOperations(config,"wikiid","Test Wiki","tw5_root_1234",null,[],[ "Long" ],function(err,operations) {
+					expect(err).toBeNull();
+					expect(store.getOverLimitTiddlers()).toContain("Long");
 					done();
 				});
 			});

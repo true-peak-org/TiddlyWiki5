@@ -363,7 +363,17 @@ json_metadata of the post
 	exports.makeTiddlerBody = function(payload,options) {
 		options = options || {};
 		var lines = [],
+			markdown = "",
+			binary = false;
+		if(options.tiddler) {
+			// Binary tiddlers such as images keep their data in the metadata of
+			// the post, the body of the post stays free of the encoded data
+			var contentTypeInfo = $tw.config.contentTypeInfo[options.tiddler.fields.type || "text/vnd.tiddlywiki"];
+			binary = !!(contentTypeInfo && contentTypeInfo.encoding === "base64");
+		}
+		if(!binary) {
 			markdown = exports.wikitextToMarkdown(payload.text,options.linkResolver);
+		}
 		lines.push("> **Note:** This post is part of a wiki published from [TiddlyWiki5](" + (options.frontEnd || "https://tiddlywiki.com") + ").");
 		lines.push("> The canonical text of the tiddler is stored in the `tw5` metadata of this post, and the");
 		lines.push("> tiddler is best read in a TiddlyWiki5 reader.");
