@@ -62,7 +62,7 @@ HiveStorageUtil.prototype.openDatabase = function(callback) {
 	if(!window.indexedDB) {
 		return callback("Indexed database is not available in this browser");
 	}
-	var request = window.indexedDB.open(this.databaseName,this.storeName);
+	var request = window.indexedDB.open(this.databaseName,1);
 	request.onupgradeneeded = function(event) {
 		var db = event.target.result;
 		if(!db.objectStoreNames.contains(self.storeName)) {
