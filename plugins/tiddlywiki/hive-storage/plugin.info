@@ -1,0 +1,7 @@
+{
+	"title": "$:/plugins/tiddlywiki/hive-storage",
+	"name": "Hive Storage",
+	"description": "IndexedDB based working storage for Hive wikis",
+	"list": "readme settings",
+	"stability": "STABILITY_2_STABLE"
+}

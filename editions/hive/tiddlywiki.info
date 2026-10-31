@@ -2,7 +2,7 @@
 	"description": "A minimal wiki for testing the Hive plugin",
 	"plugins": [
 		"tiddlywiki/hive",
-		"tiddlywiki/browser-storage",
+		"tiddlywiki/hive-storage",
 		"tiddlywiki/filesystem"
 	],
 	"themes": [

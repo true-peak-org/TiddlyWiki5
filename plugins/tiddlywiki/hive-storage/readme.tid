@@ -1,0 +1,22 @@
+title: $:/plugins/tiddlywiki/hive-storage/readme
+type: text/vnd.tiddlywiki
+
+! Hive storage plugin
+
+Stores the working copies of the tiddlers of a wiki in the IndexedDB database that is built into the browser instead of in browser local storage.
+
+The browser local storage is limited to about 5 MB, which is not enough for larger wikis. The IndexedDB database of the browser is a much larger and more capable store, and is used here.
+
+The plugin is part of the [[https://github.com/true-peak-org/TiddlyWiki5|Hive plugin set]] and is used by the [[hive|Hive edition]] of the TiddlyWiki5 repository.
+
+!! Settings
+
+|!Setting |!Default |!Description |
+|Enabled |`yes` |Whether the working copies are stored in the Indexed database |
+|Save filter |`[all[]] -[prefix[$:/state/popup/]] -[prefix[$:/temp/]] -[prefix[$:/HistoryList]]` |The filter that determines which tiddlers are saved |
+|Quota exceeded alert | |The alert message that is shown when storing a tiddler fails |
+|Indexed database persistence | |The permission state that prevents the browser from evicting the database |
+
+! Requirements
+
+The plugin requires a browser with support for the Indexed database API and a secure context.

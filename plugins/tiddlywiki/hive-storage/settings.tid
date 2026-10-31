@@ -1,0 +1,49 @@
+title: $:/plugins/tiddlywiki/hive-storage/settings
+caption: Hive Storage
+tags: $:/tags/ControlPanel/SettingsTab
+
+! Disable
+
+You can disable the hive storage plugin:
+
+<$checkbox tiddler="$:/config/HiveStorage/Enabled" field="text" checked="yes" unchecked="no" default="yes"> Use indexed database storage</$checkbox>
+
+! Clear
+
+Click this button to clear the indexed database and disable its use:
+
+<$button message="tm-clear-hive-storage">Clear indexed database</$button>
+
+! Save Filter
+
+This filter determines which tiddlers will be saved to the indexed database.
+
+* `[prefix[$:/state/]] -[prefix[$:/state/popup/]]` - the default value. Save state tiddlers except popup state tiddlers, thus preserving selected tabs and the open/closed status of table of contents entries. Any other tiddlers created or changed will be lost after reloading the page.
+* `[all[]]` - attempt to save all changed tiddlers. This means even popup state tiddlers and temporary tiddlers will be saved.
+* `[all[]] -[prefix[$:/state/popup/]] -[prefix[$:/temp/]] -[prefix[$:/HistoryList]]` - save all tiddlers except popup state tiddlers, temp tiddlers and the history list.
+
+|tc-table-no-border|k
+|<$link to="$:/config/HiveStorage/SaveFilter">Hive Storage Save Filter</$link> |<$edit-text tiddler="$:/config/HiveStorage/SaveFilter" default="" tag="input"/> |
+
+! Custom Quota Exceeded Alert
+
+This setting allows a custom alert message to be displayed when an attempt is made to store a tiddler in the indexed database and it fails.
+
+|tc-table-no-border|k
+|<$link to="$:/config/HiveStorage/QuotaExceededAlert">Hive Storage Quota Exceeded Alert</$link> |<$edit-text tiddler="$:/config/HiveStorage/QuotaExceededAlert" default="" tag="input"/> |
+
+! Prevent browser from evicting the indexed database
+
+Permission for indexed database persistence: ''{{$:/state/hive/storage/persisted}}''
+
+The first time a tiddler is saved to the indexed database a request will be made to prevent automatic eviction of the database for this site. This means the data will not be cleared unless the user manually clears it.
+
+Old browsers may not support this feature. New browsers might not support the feature if the wiki is hosted on a non-localhost unencrypted http connection.
+
+Some browsers will explicitly prompt the user for permission. Other browsers may automatically grant or deny the request based on site usage or based on whether the site is bookmarked.
+
+! Startup Log
+
+The tiddler $:/temp/HiveStorage/Log contains a log of the tiddlers that were loaded from the indexed database at startup:
+
+<<list-links "[enlist{$:/temp/HiveStorage/Log}sort[]]">>
