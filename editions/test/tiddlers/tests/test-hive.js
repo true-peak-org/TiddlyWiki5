@@ -268,11 +268,12 @@ Tests for the Hive storage plugin.
 					var child = operations.filter(function(operation) {
 							return JSON.parse(operation.json_metadata).tw5.title === "Child";
 						})[0],
-						parent = operations.filter(function(operation) {
+						root = operations.filter(function(operation) {
 							return JSON.parse(operation.json_metadata).tw5.title === "Parent";
 						})[0];
 					expect(child.parent_permlink).toBe("tw5_root_1234");
 					expect(child.permlink).toBe(util.getTiddlerPermlink("wikiid","Child"));
+					expect(root.parent_permlink).toBe("tw5_root_1234");
 					done();
 				});
 			});
