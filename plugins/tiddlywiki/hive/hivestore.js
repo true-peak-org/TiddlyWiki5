@@ -469,21 +469,6 @@ title
 	};
 
 	/*
-Return the permlink of the reply that a tiddler has to be nested underneath
-*/
-	HiveStore.prototype.getParentPermlink = function(tiddler,entries,config,rootPermlink) {
-		if(config.nesting !== "path") {
-			return rootPermlink;
-		}
-		var parentTitle = this.getParentTitle(tiddler,entries);
-		if(!parentTitle) {
-			return rootPermlink;
-		}
-		var parent = entries[parentTitle];
-		return parent.parts > 1 ? util.getPartPermlink(parent.permlink,1) : parent.permlink;
-	};
-
-	/*
 Build the list of operations that have to be broadcast
 */
 	HiveStore.prototype.buildOperations = function(config,wikiId,wikiTitle,rootPermlink,rootContent,replies,titles,callback) {
@@ -516,8 +501,7 @@ Build the list of operations that have to be broadcast
 		entryList.forEach(function(entry) {
 			var tiddler = self.wiki.getTiddler(entry.title),
 				payload = util.getTiddlerPayload(tiddler),
-				parts = self.splitPayload(payload),
-				parentPermlink = self.getParentPermlink(tiddler,entries,config,rootPermlink);
+				parts = self.splitPayload(payload);
 			if(JSON.stringify({app: "tw5",tw5: payload}).length > MAX_METADATA_LENGTH) {
 				// The metadata of this tiddler would exceed the limit of a Hive post
 				if(overLimit.indexOf(entry.title) === -1) {
@@ -558,7 +542,10 @@ Build the list of operations that have to be broadcast
 				operations.push({
 					type: "comment",
 					parent_author: config.account,
-					parent_permlink: parentPermlink,
+					// All the tiddlers are replies to the root post of the wiki, the
+					// hierarchy between the tiddlers is carried by the tags of the
+					// tiddler that names its parent
+					parent_permlink: rootPermlink,
 					author: config.account,
 					permlink: permlink,
 					title: util.makeTitle(entry.title + (part.parts > 1 ? " (" + part.part + "/" + part.parts + ")" : "")),
@@ -782,11 +769,22 @@ Add the tiddlers of the replies to the wiki
 */
 	HiveStore.prototype.applyReplies = function(config,rootMetadata,replies,callback) {
 		var self = this,
-			summary = {added: 0,updated: 0,removed: 0,skipped: 0},
-			byTitle = {};
+			summary = {added: 0,updated: 0,removed: 0,skipped: 0,comments: 0},
+			byTitle = {},
+			comments = [];
 		(replies || []).forEach(function(reply) {
 			var metadata = self.getTw5Metadata(reply);
-			if(!metadata || metadata.type !== "tiddler") {
+			if(!metadata) {
+				return;
+			}
+			if(metadata.type === "comment") {
+				// A reply that is a comment is a proposed change or a comment on
+				// the tiddler that it replies to. It is loaded as a transient
+				// tiddler that holds the replied to tiddler as a tag
+				comments.push({reply: reply,metadata: metadata});
+				return;
+			}
+			if(metadata.type !== "tiddler") {
 				return;
 			}
 			if(!byTitle[metadata.title]) {
@@ -825,6 +823,35 @@ Add the tiddlers of the replies to the wiki
 				summary.added++;
 			}
 			self.wiki.addTiddler(util.payloadToTiddler(payload));
+		});
+		// The comments are loaded as transient tiddlers that hold the tiddler
+		// that they reply to as a tag, and that hold a tag that marks them as a
+		// proposed change or a comment
+		comments.forEach(function(comment) {
+			var metadata = comment.metadata,
+				metadataTags = $tw.utils.isArray(metadata.tags) ? metadata.tags.slice(0) : (metadata.tags ? [metadata.tags] : []),
+				transientTags = [],
+				repliedTo = null;
+			metadataTags.forEach(function(tag) {
+				if(tag === util.COMMENT_TAG) {
+					return;
+				}
+				if(!repliedTo) {
+					// The first tag that is not a marker names the tiddler to reply to
+					repliedTo = tag;
+				}
+				transientTags.push(tag);
+			});
+			transientTags.push(util.COMMENT_TAG);
+			self.wiki.addTiddler(util.payloadToTiddler({
+				title: metadata.title,
+				text: metadata.text,
+				fields: metadata.fields,
+				tags: transientTags,
+				created: metadata.created,
+				modified: metadata.modified
+			}));
+			summary.comments++;
 		});
 		callback(null,summary);
 	};

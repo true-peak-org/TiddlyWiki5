@@ -242,22 +242,25 @@ Tests for the Hive storage plugin.
 				});
 			});
 
-			it("should nest the replies underneath the reply of their parent", function(done) {
+			it("should put the replies of the tiddlers underneath the root post", function(done) {
 				var store = new HiveStore({wiki: wiki}),
 					config = store.getConfig();
 				store.buildOperations(config,"wikiid","Test Wiki","tw5_root_1234",null,[],["Parent","Parent/Child"],function(err,operations) {
 					var child = operations.filter(function(operation) {
 							return JSON.parse(operation.json_metadata).tw5.title === "Parent/Child";
 						})[0],
-						parent = operations.filter(function(operation) {
+						root = operations.filter(function(operation) {
 							return JSON.parse(operation.json_metadata).tw5.title === "Parent";
 						})[0];
-					expect(child.parent_permlink).toBe(parent.permlink);
+					// The hierarchy is not carried by the reply chain anymore, all
+					// the tiddlers are replies of the root post of the wiki
+					expect(child.parent_permlink).toBe("tw5_root_1234");
+					expect(root.parent_permlink).toBe("tw5_root_1234");
 					done();
 				});
 			});
 
-			it("should nest the replies underneath the reply of the parent given as a tag", function(done) {
+			it("should put the replies of the tiddlers underneath the root post, the hierarchy being given by the tags", function(done) {
 				var store = new HiveStore({wiki: wiki}),
 					config = store.getConfig();
 				wiki.addTiddler(new $tw.Tiddler({title: "Child",text: "Nested",tags: ["Parent"]}));
@@ -268,7 +271,7 @@ Tests for the Hive storage plugin.
 						parent = operations.filter(function(operation) {
 							return JSON.parse(operation.json_metadata).tw5.title === "Parent";
 						})[0];
-					expect(child.parent_permlink).toBe(parent.permlink);
+					expect(child.parent_permlink).toBe("tw5_root_1234");
 					expect(child.permlink).toBe(util.getTiddlerPermlink("wikiid","Child"));
 					done();
 				});
@@ -398,6 +401,31 @@ Tests for the Hive storage plugin.
 				store.applyReplies(config,{type: "root",wikiid: "wikiid"},replies,function(err,summary) {
 					expect(summary.skipped).toBe(1);
 					expect(wiki.getTiddler("HelloThere").fields.text).toBe("Welcome");
+					done();
+				});
+			});
+
+			it("should load a comment as a transient tiddler that holds the replied to tiddler as a tag", function(done) {
+				var store = new HiveStore({wiki: wiki}),
+					config = store.getConfig(),
+					replies = [{
+						permlink: "tw5_Comment_1234",
+						json_metadata: JSON.stringify({app: "tw5",tw5: {
+							type: "comment",
+							title: "Comment on Child",
+							text: "This is a comment",
+							fields: {},
+							tags: ["Child", "Proposed"],
+							part: 1,
+							parts: 1
+						}})
+					}];
+				store.applyReplies(config,{type: "root",wikiid: "wikiid"},replies,function(err,summary) {
+					expect(err).toBeNull();
+					expect(summary.comments).toBe(1);
+					var tiddler = wiki.getTiddler("Comment on Child");
+					expect(tiddler.fields.text).toBe("This is a comment");
+					expect(tiddler.fields.tags).toEqual(["Child","Proposed"]);
 					done();
 				});
 			});

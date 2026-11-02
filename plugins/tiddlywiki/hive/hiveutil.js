@@ -32,6 +32,11 @@ Maximum number of operations in a single transaction
 	exports.MAX_OPS_PER_TRANSACTION = 10;
 
 	/*
+Tag that marks a tiddler that is a proposed change or a comment
+*/
+	exports.COMMENT_TAG = "Proposed";
+
+	/*
 Fields that are not copied into the payload of a tiddler because they are
 either stored explicitly or are local bookkeeping
 */
