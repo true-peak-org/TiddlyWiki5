@@ -114,6 +114,28 @@ Tests for the Hive storage plugin.
 				expect(body).not.toContain("iVBORw0KGgo");
 			});
 
+			it("should detect markdown content", function() {
+				expect(util.isMarkdown("# Heading")).toBe(true);
+				expect(util.isMarkdown("## Sub Heading")).toBe(true);
+				expect(util.isMarkdown("```\nvar a = 1;\n```")).toBe(true);
+				expect(util.isMarkdown("! Heading")).toBe(false);
+				expect(util.isMarkdown("Hello world")).toBe(false);
+			});
+
+			it("should convert markdown into tiddlywiki syntax", function() {
+				expect(util.markdownToTiddlyWiki("# Heading")).toBe("! Heading");
+				expect(util.markdownToTiddlyWiki("## Sub Heading")).toBe("!! Sub Heading");
+				expect(util.markdownToTiddlyWiki("[Label](https://example.com)")).toBe("[[https://example.com|Label]]");
+				expect(util.markdownToTiddlyWiki("```\nvar a = 1;\n```")).toBe("{{{\nvar a = 1;\n}}}");
+			});
+
+			it("should make the body of a tiddler that is authored in markdown", function() {
+				var body = util.makeTiddlerBody({title: "HelloThere",text: "# Heading\n\nSome text"},{frontEnd: "https://hive.blog"});
+				expect(body).toContain("# HelloThere");
+				expect(body).toContain("# Heading");
+				expect(body).toContain("Some text");
+			});
+
 			it("should truncate long titles", function() {
 				var title = util.makeTitle(new Array(500).join("a"));
 				expect(title.length).toBeLessThan(util.MAX_TITLE_LENGTH + 1);
@@ -441,6 +463,32 @@ Tests for the Hive storage plugin.
 				store.applyReplies(config,{type: "root",wikiid: "wikiid"},replies,function(err,summary) {
 					expect(wiki.getTiddler("Big").fields.text).toBe("one two");
 					done();
+				});
+			});
+
+			it("should approve a proposed tiddler by creating the official reply", function(done) {
+				var store = new HiveStore({wiki: wiki});
+				store.keychain = {
+					broadcast: function(username,operations,method,callback) {
+						expect(operations.length).toBe(1);
+						expect(operations[0].parent_permlink).toBe("tw5_Proposed_1234");
+						expect(operations[0].author).toBe("someone");
+						var metadata = JSON.parse(operations[0].json_metadata);
+						expect(metadata.tw5.type).toBe("tiddler");
+						expect(metadata.tw5.text).toBe("! Proposed\n\nSome **text**");
+						done();
+						callback(null,{id: "tx"});
+					}
+				};
+				wiki.addTiddler(new $tw.Tiddler({title: "$:/config/tiddlywiki/hive/account",text: "someone"}));
+				var replies = [{
+					author: "someone",
+					permlink: "tw5_Proposed_1234",
+					json_metadata: JSON.stringify({app: "tw5",tw5: {type: "proposal",title: "ProposedThing",text: "# Proposed\n\nSome **text**",fields: {},tags: [],created: "",modified: "",part: 1,parts: 1}})
+				}];
+				store.approve(replies,function(err,result) {
+					expect(err).toBeNull();
+					expect(result.operations).toBe(1);
 				});
 			});
 

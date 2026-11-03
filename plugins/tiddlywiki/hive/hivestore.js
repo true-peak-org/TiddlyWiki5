@@ -711,6 +711,79 @@ Broadcast the operations, in batches of a limited size
 	};
 
 	/*
+Approve a reply that carries the content of a tiddler: broadcast the
+official reply that holds the official content of the tiddler as a reply
+to the hive comment of the user that proposed or edited the tiddler, which
+shows the implicit attribution of the proposal or the edit
+*/
+	HiveStore.prototype.approve = function(replies,callback) {
+		var self = this,
+			config = this.getConfig(),
+			operations = [],
+			wikiId = this.getWikiId();
+		callback = callback || function() {};
+		if(!config.account) {
+			return callback("No Hive account name has been configured. Please enter your Hive account name in the control panel.");
+		}
+		if(!this.keychain) {
+			return callback("The Hive Keychain browser extension is not available");
+		}
+		(replies || []).forEach(function(reply) {
+			var metadata = self.getTw5Metadata(reply);
+			if(!metadata || (metadata.type !== "proposal" && metadata.type !== "comment")) {
+				return;
+			}
+			// The content of the official tiddler is authored in tiddlywiki
+			// syntax, the markdown of the hive reply is converted into it
+			var text = util.isMarkdown(metadata.text) ? util.markdownToTiddlyWiki(metadata.text) : (metadata.text || "");
+			var officialMetadata = {
+				type: "tiddler",
+				title: metadata.title,
+				text: text,
+				fields: metadata.fields || {},
+				tags: metadata.tags || [],
+				created: metadata.created || "",
+				modified: metadata.modified || ""
+			};
+			operations.push({
+				type: "comment",
+				parent_author: config.account,
+				// The official tiddler is a reply to the hive comment of the user
+				// that proposed or edited the tiddler, which shows the implicit
+				// attribution of the proposal or the edit
+				parent_permlink: reply.permlink,
+				author: config.account,
+				permlink: util.getTiddlerPermlink(wikiId,metadata.title),
+				title: util.makeTitle(metadata.title),
+				body: util.makeTiddlerBody({title: metadata.title,text: text,fields: officialMetadata.fields,tags: officialMetadata.tags,created: officialMetadata.created,modified: officialMetadata.modified},{frontEnd: config.frontEnd,linkResolver: self.makeLinkResolver(config,[{title: metadata.title,permlink: util.getTiddlerPermlink(wikiId,metadata.title)}],wikiId)}),
+				json_metadata: JSON.stringify({app: "tw5",tw5: officialMetadata})
+			});
+		});
+		if(!operations.length) {
+			return callback(null,{permlink: "",operations: 0,results: []});
+		}
+		this.broadcastOperations(config,operations,function(err,results) {
+			if(err) {
+				return callback(err);
+			}
+			operations.forEach(function(operation) {
+				var metadata = self.getTw5Metadata(operation);
+				if(metadata && metadata.type === "tiddler") {
+					self.wiki.addTiddler(util.payloadToTiddler({
+						title: metadata.title,
+						text: metadata.text,
+						fields: metadata.fields,
+						tags: metadata.tags,
+						created: metadata.created,
+						modified: metadata.modified
+					}));
+				}
+			});
+			callback(null,{permlink: "",operations: operations.length,results: results});
+		});
+	};
+
+	/*
 Load the wiki from Hive. The callback is invoked with (err,result)
 */
 	HiveStore.prototype.load = function(permlink,callback) {

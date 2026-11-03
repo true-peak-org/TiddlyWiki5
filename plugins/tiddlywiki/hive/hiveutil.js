@@ -234,6 +234,76 @@ the wiki
 	};
 
 	/*
+Return true when the given text is authored in markdown rather than in
+TiddlyWiki wikitext. Hive originated content such as comments and
+proposals is usually authored in markdown
+*/
+	exports.isMarkdown = function(text) {
+		var lines = String(text === undefined || text === null ? "" : text).split("\n");
+		for(var i = 0; i < lines.length; i++) {
+			if(/^#{1,6}\s+/.test(lines[i]) || /^```/.test(lines[i])) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	/*
+Convert a markdown document into TiddlyWiki wikitext. The markdown of hive
+originated content such as proposals is converted into the tiddlywiki
+syntax when the content is approved and stored as an official tiddler
+*/
+	exports.markdownToTiddlyWiki = function(markdown) {
+		var lines = String(markdown === undefined || markdown === null ? "" : markdown).split("\n"),
+			out = [],
+			i = 0;
+		while(i < lines.length) {
+			var line = lines[i];
+			var fenceMatch = /^```([^\n]*)$/.exec(line);
+			if(fenceMatch) {
+				var codeLines = [];
+				i++;
+				while(i < lines.length && !/^```\s*$/.test(lines[i])) {
+					codeLines.push(lines[i]);
+					i++;
+				}
+				i++;
+				out.push("{{{");
+				out.push(codeLines.join("\n"));
+				out.push("}}}");
+				continue;
+			}
+			var headingMatch = /^(#{1,6})\s+(.*)$/.exec(line);
+			if(headingMatch) {
+				out.push(new Array(headingMatch[1].length + 1).join("!") + " " + headingMatch[2]);
+				i++;
+				continue;
+			}
+			var linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(line);
+			if(linkMatch) {
+				out.push("[[" + linkMatch[2] + "|" + linkMatch[1] + "]]");
+				i++;
+				continue;
+			}
+			var boldMatch = /^\*\*(.+)\*\*$/.exec(line);
+			if(boldMatch) {
+				out.push("''" + boldMatch[1] + "''");
+				i++;
+				continue;
+			}
+			var italicMatch = /^_(.+)_$/.exec(line);
+			if(italicMatch) {
+				out.push("//" + italicMatch[1] + "//");
+				i++;
+				continue;
+			}
+			out.push(line);
+			i++;
+		}
+		return out.join("\n");
+	};
+
+	/*
 Convert a wikitext tiddler into markdown. The optional linkResolver
 callback is passed the target of a link and should return the URL to use
 or null to leave the link alone
@@ -377,7 +447,10 @@ json_metadata of the post
 			binary = !!(contentTypeInfo && contentTypeInfo.encoding === "base64");
 		}
 		if(!binary) {
-			markdown = exports.wikitextToMarkdown(payload.text,options.linkResolver);
+			// TiddlyWiki originated content is converted into markdown, hive
+			// originated content such as comments and proposals is usually
+			// authored in markdown already
+			markdown = exports.isMarkdown(payload.text) ? String(payload.text || "") : exports.wikitextToMarkdown(payload.text,options.linkResolver);
 		}
 		lines.push("> **Note:** This post is part of a wiki published from [TiddlyWiki5](" + (options.frontEnd || "https://tiddlywiki.com") + ").");
 		lines.push("> The canonical text of the tiddler is stored in the `tw5` metadata of this post, and the");
