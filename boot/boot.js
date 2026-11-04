@@ -2588,7 +2588,11 @@ $tw.boot.startup = function(options) {
 	// Get the URL hash and check for safe mode
 	$tw.boot.initStartup(options);
 	$tw.boot.loadStartup(options);
-	$tw.boot.execStartup(options);
+	// Load any module sources that were configured before continuing with the startup
+	$tw.boot.loadModuleSources(function() {
+		// Execute the startup tasks
+		$tw.boot.execStartup(options);
+	});
 };
 
 /*
@@ -2754,6 +2758,62 @@ $tw.hooks.invokeHook = function(hookName /*, value,... */) {
 		}
 	}
 	return args[0];
+};
+
+/*
+External module sources
+
+An optional hashmap of module titles to source descriptors. Each descriptor
+provides the location of a module that is not stored within the wiki itself,
+along with the type of the module. Modules that are not found in the wiki
+store are loaded from these sources before the startup process continues.
+
+This allows the boot scripts and library modules of a wiki to be hosted at a
+CDN, or served from any other location, instead of being bundled into the
+wiki file itself. A wiki that is posted as a single HTML file can therefore
+delegate all of its modules to external resources, and only needs to carry the
+content of the wiki itself.
+*/
+$tw.boot.moduleSources = $tw.boot.moduleSources || Object.create(null);
+
+/*
+Load any module sources that have been configured, and define the modules
+once their sources have been fetched. Calls back when all modules have been
+loaded, or immediately when there are no module sources configured.
+*/
+$tw.boot.loadModuleSources = function(callback) {
+	callback = callback || function() {};
+	var sources = $tw.boot.moduleSources || Object.create(null),
+		titles = Object.keys(sources),
+		remaining = titles.length,
+		completed = false,
+		complete = function() {
+			if(!completed && remaining <= 0) {
+				completed = true;
+				callback();
+			}
+		};
+	if(remaining === 0) {
+		return callback();
+	}
+	for(var i = 0; i < titles.length; i++) {
+		var moduleTitle = titles[i],
+			source = sources[moduleTitle];
+		var xhr = new XMLHttpRequest();
+		xhr.open("GET", source.src, true);
+		xhr.onload = function() {
+			if(xhr.status === 200 && xhr.responseText) {
+				$tw.modules.define(moduleTitle, source.type, xhr.responseText);
+			}
+			remaining--;
+			complete();
+		};
+		xhr.onerror = function() {
+			remaining--;
+			complete();
+		};
+		xhr.send();
+	}
 };
 
 /////////////////////////// Main boot function to decrypt tiddlers and then startup
