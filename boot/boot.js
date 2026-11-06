@@ -2590,8 +2590,11 @@ $tw.boot.startup = function(options) {
 	$tw.boot.loadStartup(options);
 	// Load any module sources that were configured before continuing with the startup
 	$tw.boot.loadModuleSources(function() {
-		// Execute the startup tasks
-		$tw.boot.execStartup(options);
+		// Load any plugin tiddler sources that were configured before continuing with the startup
+		$tw.boot.loadPluginSources(function() {
+			// Execute the startup tasks
+			$tw.boot.execStartup(options);
+		});
 	});
 };
 
@@ -2778,8 +2781,10 @@ $tw.boot.moduleSources = $tw.boot.moduleSources || Object.create(null);
 
 /*
 Load any module sources that have been configured, and define the modules
-once their sources have been fetched. Calls back when all modules have been
-loaded, or immediately when there are no module sources configured.
+once their sources have been fetched. Each source entry may use the verbose
+form {"src": <url>, "type": <moduleType>} or the compact form {"u": <url>,
+"t": <moduleType>}. Calls back when all modules have been loaded, or
+immediately when there are no module sources configured.
 */
 $tw.boot.loadModuleSources = function(callback) {
 	callback = callback || function() {};
@@ -2796,14 +2801,12 @@ $tw.boot.loadModuleSources = function(callback) {
 	if(remaining === 0) {
 		return callback();
 	}
-	for(var i = 0; i < titles.length; i++) {
-		var moduleTitle = titles[i],
-			source = sources[moduleTitle];
+	var loadModuleSource = function(moduleTitle, source) {
 		var xhr = new XMLHttpRequest();
-		xhr.open("GET", source.src, true);
+		xhr.open("GET", source.src || source.u, true);
 		xhr.onload = function() {
 			if(xhr.status === 200 && xhr.responseText) {
-				$tw.modules.define(moduleTitle, source.type, xhr.responseText);
+				$tw.modules.define(moduleTitle, source.type || source.t, xhr.responseText);
 			}
 			remaining--;
 			complete();
@@ -2813,6 +2816,76 @@ $tw.boot.loadModuleSources = function(callback) {
 			complete();
 		};
 		xhr.send();
+	};
+	for(var i = 0; i < titles.length; i++) {
+		loadModuleSource(titles[i], sources[titles[i]]);
+	}
+};
+
+/*
+External JavaScript can populate this object before calling boot.js in order to
+load plugin tiddlers (for example the core, themes and language plugins) from
+external locations instead of bundling them into the wiki file itself. Each
+entry maps a plugin tiddler title to {"u": <url>} (with "src" accepted as an
+alias, and a bare url string accepted as well).
+*/
+$tw.boot.pluginSources = $tw.boot.pluginSources || Object.create(null);
+
+/*
+Load any plugin tiddler sources that have been configured, adding each fetched
+tiddler to the wiki so that it is available before the startup tasks unpack
+plugin tiddlers. Each fetched file may contain either a single tiddler fields
+object or an array of tiddler field objects. Calls back when all plugins have
+been loaded, or immediately when there are no plugin sources configured.
+*/
+$tw.boot.loadPluginSources = function(callback) {
+	callback = callback || function() {};
+	var sources = $tw.boot.pluginSources || Object.create(null),
+		titles = Object.keys(sources),
+		remaining = titles.length,
+		completed = false,
+		complete = function() {
+			if(!completed && remaining <= 0) {
+				completed = true;
+				callback();
+			}
+		};
+	if(remaining === 0) {
+		return callback();
+	}
+	var loadPluginSource = function(pluginTitle, source) {
+		var xhr = new XMLHttpRequest();
+		xhr.open("GET", source.u || source.src || source, true);
+		xhr.onload = function() {
+			if(xhr.status === 200 && xhr.responseText) {
+				var fields;
+				try {
+					fields = JSON.parse(xhr.responseText);
+				} catch(e) {
+					fields = null;
+				}
+				if(fields) {
+					if(Object.prototype.toString.call(fields) === "[object Array]") {
+						for(var i = 0; i < fields.length; i++) {
+							$tw.wiki.addTiddler(fields[i]);
+						}
+					} else {
+						fields.title = pluginTitle;
+						$tw.wiki.addTiddler(fields);
+					}
+				}
+			}
+			remaining--;
+			complete();
+		};
+		xhr.onerror = function() {
+			remaining--;
+			complete();
+		};
+		xhr.send();
+	};
+	for(var i = 0; i < titles.length; i++) {
+		loadPluginSource(titles[i], sources[titles[i]]);
 	}
 };
 
