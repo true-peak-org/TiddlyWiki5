@@ -32,8 +32,17 @@ exports.startup = function() {
 	});
 	// Function to compile the filter
 	var filterFn,
+		deletionPrefixes,
 		compileFilter = function() {
 			filterFn = $tw.wiki.compileFilter($tw.wiki.getTiddlerText(SAVE_FILTER_TITLE));
+			// Deleted tiddlers are not matched by the save filter, so the
+			// exclusion prefixes used by its "-[prefix[...]]" clauses are
+			// extracted separately
+			deletionPrefixes = [];
+			var matches = $tw.wiki.getTiddlerText(SAVE_FILTER_TITLE).match(/-\[prefix\[([^\]]+)\]\]/g) || [];
+			$tw.utils.each(matches,function(match) {
+				deletionPrefixes.push(match.substring(9,match.length - 2));
+			});
 		};
 	compileFilter();
 	// Listen for tm-clear-hive-storage messages
@@ -120,6 +129,33 @@ exports.startup = function() {
 				return;
 			}
 			// Save the tiddler
+			$tw.hiveStorage.saveTiddlerToIndexedDB(title, function(err) {
+				if(err) {
+					console.log("Hive storage error:",err);
+				}
+			});
+		});
+		// Deleted tiddlers are not matched by the save filter, so they are handled
+		// explicitly by respecting the exclusion prefixes of the save filter
+		$tw.utils.each(changes,function(change,title) {
+			if(!change || !change.deleted) {
+				return;
+			}
+			// Don't try to save changes to our enabled status
+			if(title === ENABLED_TITLE) {
+				return;
+			}
+			// This should always be queried from the browser, so don't store it in the indexed database
+			if(title === PERSISTED_STATE_TITLE) {
+				return;
+			}
+			for(var t=0; t<deletionPrefixes.length; t++) {
+				if(title.substring(0,deletionPrefixes[t].length) === deletionPrefixes[t]) {
+					return;
+				}
+			}
+			// Saving the deleted tiddler stores the blank deletion marker in the
+			// indexed database
 			$tw.hiveStorage.saveTiddlerToIndexedDB(title, function(err) {
 				if(err) {
 					console.log("Hive storage error:",err);

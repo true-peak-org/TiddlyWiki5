@@ -75,6 +75,16 @@ function bootstrapHiveStorage() {
 					callback(event.target.error);
 				};
 			});
+		},
+		removeTiddlerFromIndexedDB: function(title) {
+			var self = this;
+			this.openDatabase(function(err,db) {
+				if(err) {
+					return;
+				}
+				var tx = db.transaction(self.storeName,"readwrite");
+				tx.objectStore(self.storeName).delete(title);
+			});
 		}
 	};
 }
@@ -108,6 +118,17 @@ function hookBootTiddlersLoaded() {
 							log.push(title);
 						}
 					}
+				}
+			} else {
+				// A blank entry marks the tiddler in the given title as deleted
+				var title = entry.title;
+				if($tw.wiki.tiddlerExists(title)) {
+					// The deletion has not taken effect yet, so enforce it here
+					$tw.wiki.deleteTiddler(title);
+				} else {
+					// The deletion has already been applied, so the marker has
+					// served its purpose and is removed
+					$tw.hiveStorage.removeTiddlerFromIndexedDB(title);
 				}
 			}
 		});

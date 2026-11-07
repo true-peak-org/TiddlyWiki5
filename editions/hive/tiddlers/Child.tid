@@ -1,5 +1,5 @@
 title: Child
 type: text/vnd.tiddlywiki
-tags: Parent
+tags: Home
 
-A tiddler that is nested underneath the reply of Parent.
+A tiddler that is nested underneath the reply of the ''Home'' tiddler.
