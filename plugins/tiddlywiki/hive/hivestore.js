@@ -170,6 +170,19 @@ Return the url of a post
 	};
 
 	/*
+Return the canonical url of a wiki post: the base url of the wiki reader
+followed by the author and permlink of the root post. Tiddler replies
+additionally carry the tiddler title as the uri fragment of the root url
+*/
+	HiveStore.prototype.makeCanonicalUrl = function(config,rootPermlink,fragment) {
+		var url = "https://shim.true-peak.org/hive/wiki/" + config.account + "/" + rootPermlink;
+		if(fragment) {
+			url += "#" + encodeURIComponent(fragment);
+		}
+		return url;
+	};
+
+	/*
 Parse the json_metadata of a post
 */
 	HiveStore.prototype.parseMetadata = function(content) {
@@ -517,7 +530,10 @@ Build the list of operations that have to be broadcast
 			parts.forEach(function(part) {
 				var permlink = part.parts > 1 ? util.getPartPermlink(entry.permlink,part.part) : entry.permlink,
 					existingReply = existing[permlink],
-					metadata = {app: "tw5",tw5: part},
+					// The reader url of this tiddler: it is shared by all the parts
+					// of the tiddler and carries the tiddler title as the fragment
+					canonicalUrl = self.makeCanonicalUrl(config,rootPermlink,entry.title),
+					metadata = {app: "tw5",canonical_url: canonicalUrl,tw5: part},
 					remoteHash = existingReply ? self.getTw5Metadata(existingReply) : null;
 				index[entry.title] = {permlink: entry.permlink,parts: part.parts,hash: part.hash,part: part};
 				if(remoteHash) {
@@ -535,6 +551,7 @@ Build the list of operations that have to be broadcast
 				}
 				var body = util.makeTiddlerBody(part,{
 						frontEnd: config.frontEnd,
+						canonicalUrl: canonicalUrl,
 						linkResolver: self.makeLinkResolver(config,entryList,wikiId),
 						tiddler: tiddler
 					}),
@@ -578,7 +595,7 @@ Build the list of operations that have to be broadcast
 				permlink: permlink,
 				title: util.makeTitle(metadata.title + " (removed)"),
 				body: "> **Note:** This tiddler has been removed from the wiki that this post belongs to.",
-				json_metadata: JSON.stringify({app: "tw5",tw5: {
+				json_metadata: JSON.stringify({app: "tw5",canonical_url: self.makeCanonicalUrl(config,rootPermlink,metadata.title),tw5: {
 					type: "tiddler",
 					title: metadata.title,
 					deleted: true,
@@ -605,6 +622,8 @@ Build the list of operations that have to be broadcast
 		root.hash = util.getPayloadHash(root.index);
 		var remoteRoot = rootContent ? self.getTw5Metadata(rootContent) : null;
 		if(!rootContent || !remoteRoot || remoteRoot.hash !== root.hash) {
+			var canonicalUrl = self.makeCanonicalUrl(config,rootPermlink);
+			// The root url carries no uri fragment
 			operations.unshift({
 				type: "comment",
 				parent_author: "",
@@ -612,8 +631,8 @@ Build the list of operations that have to be broadcast
 				author: config.account,
 				permlink: rootPermlink,
 				title: util.makeTitle(wikiTitle),
-				body: util.makeRootBody(root,{frontEnd: config.frontEnd, appUrl: this.getConfigText("app-url","")}),
-				json_metadata: JSON.stringify({app: "tw5",tw5: root})
+				body: util.makeRootBody(root,{frontEnd: config.frontEnd, appUrl: this.getConfigText("app-url",""), canonicalUrl: canonicalUrl}),
+				json_metadata: JSON.stringify({app: "tw5",canonical_url: canonicalUrl,tw5: root})
 			});
 		}
 		// Make sure that parents are broadcast before their children
@@ -720,7 +739,8 @@ shows the implicit attribution of the proposal or the edit
 		var self = this,
 			config = this.getConfig(),
 			operations = [],
-			wikiId = this.getWikiId();
+			wikiId = this.getWikiId(),
+			rootPermlink = this.getRootPermlink(wikiId,this.getWikiTitle());
 		callback = callback || function() {};
 		if(!config.account) {
 			return callback("No Hive account name has been configured. Please enter your Hive account name in the control panel.");
@@ -745,6 +765,9 @@ shows the implicit attribution of the proposal or the edit
 				created: metadata.created || "",
 				modified: metadata.modified || ""
 			};
+			// The canonical url of the tiddler: the reader url of the root post
+			// with the tiddler title as the uri fragment
+			var canonicalUrl = self.makeCanonicalUrl(config,rootPermlink,metadata.title);
 			operations.push({
 				type: "comment",
 				parent_author: config.account,
@@ -755,8 +778,8 @@ shows the implicit attribution of the proposal or the edit
 				author: config.account,
 				permlink: util.getTiddlerPermlink(wikiId,metadata.title),
 				title: util.makeTitle(metadata.title),
-				body: util.makeTiddlerBody({title: metadata.title,text: text,fields: officialMetadata.fields,tags: officialMetadata.tags,created: officialMetadata.created,modified: officialMetadata.modified},{frontEnd: config.frontEnd,linkResolver: self.makeLinkResolver(config,[{title: metadata.title,permlink: util.getTiddlerPermlink(wikiId,metadata.title)}],wikiId)}),
-				json_metadata: JSON.stringify({app: "tw5",tw5: officialMetadata})
+				body: util.makeTiddlerBody({title: metadata.title,text: text,fields: officialMetadata.fields,tags: officialMetadata.tags,created: officialMetadata.created,modified: officialMetadata.modified},{frontEnd: config.frontEnd,canonicalUrl: canonicalUrl,linkResolver: self.makeLinkResolver(config,[{title: metadata.title,permlink: util.getTiddlerPermlink(wikiId,metadata.title)}],wikiId)}),
+				json_metadata: JSON.stringify({app: "tw5",canonical_url: canonicalUrl,tw5: officialMetadata})
 			});
 		});
 		if(!operations.length) {

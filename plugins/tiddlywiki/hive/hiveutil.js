@@ -454,7 +454,11 @@ json_metadata of the post
 		}
 		lines.push("> **Note:** This post is part of a wiki published from [TiddlyWiki5](" + (options.frontEnd || "https://tiddlywiki.com") + ").");
 		lines.push("> The canonical text of the tiddler is stored in the `tw5` metadata of this post, and the");
-		lines.push("> tiddler is best read in a TiddlyWiki5 reader.");
+		if(options.canonicalUrl) {
+			lines.push("> tiddler is best read in a [TiddlyWiki5 reader](" + options.canonicalUrl + ").");
+		} else {
+			lines.push("> tiddler is best read in a TiddlyWiki5 reader.");
+		}
 		lines.push("");
 		lines.push("# " + payload.title);
 		lines.push("");
@@ -479,6 +483,9 @@ The root post is the entry point for a Hive wiki presence: the app
 			appUrl = options.appUrl || "";
 		lines.push("> **Note:** This post is the root of a wiki published from [TiddlyWiki5](" + (options.frontEnd || "https://tiddlywiki.com") + ").");
 		lines.push("> Each tiddler of the wiki is stored as a reply to this post.");
+		if(options.canonicalUrl) {
+			lines.push("> Read this wiki in a [TiddlyWiki5 reader](" + options.canonicalUrl + ").");
+		}
 		if(appUrl) {
 			lines.push("> Open the app: [" + appUrl + "](" + appUrl + ")");
 		}
