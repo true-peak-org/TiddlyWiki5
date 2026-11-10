@@ -431,6 +431,25 @@ used as the label of a markdown link
 	};
 
 	/*
+Convert hivelink procedure calls into markdown links to the Hive
+front-end. The space call syntax is
+
+	<<hivelink accountId permlink "Caption">>
+
+and is published as `[Caption](https://hive.blog/accountId/permlink)`
+so that the blog post shows a normal link to the Hive post
+*/
+	exports.expandHiveLinks = function(text,frontEnd) {
+		frontEnd = frontEnd || "https://hive.blog";
+		var re = /<<hivelink\s+([^\s>"'=]+)\s+([^\s>"'=]+)\s*(?:(?:"([^"]*)"|'([^']*)'|\[\[([^\]]*)\]\]))?[^>]*?>>/g;
+		return String(text === undefined || text === null ? "" : text).replace(re,function(match,account,permlink,dq,sq,bracket) {
+			var caption = dq || sq || bracket || permlink;
+			account = String(account).replace(/^@/,"");
+			return "[" + caption + "](" + frontEnd + "/" + account + "/" + permlink + ")";
+		});
+	};
+
+	/*
 Return the body of a post for a tiddler. The body is a human readable
 markdown rendering of the tiddler, the canonical text is kept in the
 json_metadata of the post
@@ -452,7 +471,8 @@ json_metadata of the post
 			// authored in markdown already
 			markdown = exports.isMarkdown(payload.text) ? String(payload.text || "") : exports.wikitextToMarkdown(payload.text,options.linkResolver);
 		}
-		lines.push("> **Note:** This post is part of a wiki published from [TiddlyWiki5](" + (options.frontEnd || "https://tiddlywiki.com") + ").");
+		markdown = exports.expandHiveLinks(markdown,options.frontEnd);
+		lines.push("> **Note:** This post is part of a wiki published from [TiddlyWiki5](https://tiddlywiki.com).");
 		lines.push("> The canonical text of the tiddler is stored in the `tw5` metadata of this post, and the");
 		if(options.canonicalUrl) {
 			lines.push("> tiddler is best read in a [TiddlyWiki5 reader](" + options.canonicalUrl + ").");
@@ -481,7 +501,7 @@ The root post is the entry point for a Hive wiki presence: the app
 		options = options || {};
 		var lines = [],
 			appUrl = options.appUrl || "";
-		lines.push("> **Note:** This post is the root of a wiki published from [TiddlyWiki5](" + (options.frontEnd || "https://tiddlywiki.com") + ").");
+		lines.push("> **Note:** This post is the root of a wiki published from [TiddlyWiki5](https://tiddlywiki.com).");
 		lines.push("> Each tiddler of the wiki is stored as a reply to this post.");
 		if(options.canonicalUrl) {
 			lines.push("> Read this wiki in a [TiddlyWiki5 reader](" + options.canonicalUrl + ").");
@@ -493,7 +513,7 @@ The root post is the entry point for a Hive wiki presence: the app
 		lines.push("# " + root.wikititle);
 		lines.push("");
 		if(root.description) {
-			lines.push(root.description);
+			lines.push(exports.expandHiveLinks(root.description,options.frontEnd));
 			lines.push("");
 		}
 		lines.push("## Contents");

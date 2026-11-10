@@ -1,0 +1,29 @@
+title: $:/plugins/tiddlywiki/hive/hivelink.css
+tags: $:/tags/Stylesheet
+type: text/css
+
+/*\
+Hivelinks look like ordinary hyperlinks: the text uses the colour of
+an internal wikilink and is underlined on hover
+\*/
+.tc-hivelink {
+	background-color: transparent;
+	border: none;
+	padding: 0;
+	margin: 0;
+	box-shadow: none;
+	font-size: inherit;
+	font-weight: inherit;
+	line-height: inherit;
+	vertical-align: baseline;
+	color: var(--tpc-tiddler-link-foreground,#5778d8);
+	text-decoration: none;
+	cursor: pointer;
+	user-select: text;
+}
+
+.tc-hivelink:hover,
+.tc-hivelink:focus {
+	color: var(--tpc-tiddler-link-foreground,#5778d8);
+	text-decoration: underline;
+}

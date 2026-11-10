@@ -111,7 +111,22 @@ Invoke the action associated with this widget
 				if(result.canonicalUrl && (self.canonical === "yes" || self.canonical === "true")) {
 					window.open(result.canonicalUrl,"_blank");
 				} else {
-					$tw.rootWidget.dispatchEvent({type: "tm-navigate",navigateTo: result.title});
+					// Navigate from this widget so that the event bubbles up
+					// through the Navigator: it opens the tiddler in the story
+					// and scrolls it into view like a wikilink does
+					var rect = event && event.target && event.target.getBoundingClientRect && event.target.getBoundingClientRect();
+					self.dispatchEvent({
+						type: "tm-navigate",
+						navigateTo: result.title,
+						navigateFromClientRect: rect ? {
+							top: rect.top,
+							left: rect.left,
+							width: rect.width,
+							right: rect.right,
+							bottom: rect.bottom,
+							height: rect.height
+						} : undefined
+					});
 				}
 			});
 			return true;

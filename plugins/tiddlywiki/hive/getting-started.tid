@@ -14,6 +14,27 @@ This is a minimal wiki for testing the Hive storage plugin.
 
 The tiddlers of this wiki are published as one reply each, underneath the root post of the wiki. The tiddler ''Child'' is tagged with ''Home'' and is therefore nested underneath the reply of the ''Home'' tiddler.
 
+! Loading a single post as a tiddler
+
+The ''hivelink'' procedure renders a link that loads a Hive post into this wiki as a tiddler:
+
+```
+<<hivelink accountId permlink "Caption">>
+```
+
+* ''accountId'': the Hive account the post belongs to (a leading ''@'' is allowed)
+* ''permlink'': the permlink of the post
+* ''Caption'' (optional): the label of the link, defaults to the permlink
+
+Clicking the link loads the post from the Hive blockchain and opens it in the story. Everything that was loaded this way carries the tag ''$:/hive/external'':
+
+* ''Save to Hive'' ignores tagged tiddlers, so reading posts never gets anything published by accident.
+* The tiddlers are still kept in this wiki, they survive a refresh.
+* The type of the tiddler follows the type that is declared in the ''json_metadata'' of the post: markdown is the default, and posts that declare html (mixed html/markdown included) are served as ''text/html''.
+* When the post was loaded before, the link checks the ''last_update'' timestamp of the post and only reloads the tiddler when the post actually changed.
+
+When the wiki is saved to Hive, the ''hivelink'' calls are published as ordinary links to the Hive front-end: `<<hivelink accountId permlink "Caption">>` becomes the markdown link `[Caption](https://hive.blog/accountId/permlink)` in the body of the post.
+
 ! Notes
 
 * Publishing is always explicit: nothing is sent to the blockchain until you press the ''Save to Hive'' button.
