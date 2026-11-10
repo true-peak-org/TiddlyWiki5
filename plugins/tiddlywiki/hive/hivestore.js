@@ -58,6 +58,9 @@ provided by the plugin
 		if(text === undefined || text === null || text === "") {
 			text = defaultValue === undefined ? "" : defaultValue;
 		}
+		// Configuration tiddlers store single line values, strips any
+		// trailing newlines that come with the stored text
+		text = text.replace(/[\r\n]+$/,"");
 		return text;
 	};
 
@@ -175,7 +178,7 @@ followed by the author and permlink of the root post. Tiddler replies
 additionally carry the tiddler title as the uri fragment of the root url
 */
 	HiveStore.prototype.makeCanonicalUrl = function(config,rootPermlink,fragment) {
-		var url = "https://shim.true-peak.org/hive/wiki/" + config.account + "/" + rootPermlink;
+		var url = "https://shim.true-peak.org/hive/wiki/@" + config.account + "/" + rootPermlink;
 		if(fragment) {
 			url += "#" + encodeURIComponent(fragment);
 		}
