@@ -708,12 +708,29 @@ Broadcast the operations, in batches of a limited size
 */
 	HiveStore.prototype.broadcastOperations = function(config,operations,callback) {
 		var self = this,
-			batches = [],
-			index = 0;
-		for(var i = 0; i < operations.length; i += util.MAX_OPS_PER_TRANSACTION) {
-			batches.push(operations.slice(i,i + util.MAX_OPS_PER_TRANSACTION));
+			batches = [];
+		// Split the operations into batches that both respect the maximum
+		// number of operations per transaction and fit within the maximum
+		// size of a transaction. A single operation that is bigger than the
+		// size limit is broadcast on its own, so that it is not blocked by
+		// the operations that precede it
+		var opIndex = 0;
+		while(opIndex < operations.length) {
+			var batchSize = 0,
+				count = 0;
+			while(opIndex + count < operations.length) {
+				var opSize = util.getOperationSize(operations[opIndex + count]);
+				if(count > 0 && (count >= util.MAX_OPS_PER_TRANSACTION || batchSize + opSize > util.MAX_TRANSACTION_LENGTH)) {
+					break;
+				}
+				batchSize += opSize;
+				count++;
+			}
+			batches.push(operations.slice(opIndex,opIndex + count));
+			opIndex += count;
 		}
-		var results = [];
+		var results = [],
+			index = 0;
 		function next() {
 			if(index >= batches.length) {
 				return callback(null,results);

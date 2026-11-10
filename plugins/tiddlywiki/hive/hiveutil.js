@@ -32,6 +32,28 @@ Maximum number of operations in a single transaction
 	exports.MAX_OPS_PER_TRANSACTION = 10;
 
 	/*
+Maximum total size of the operations in a single transaction. The blockchain
+rejects transactions whose serialized form is longer than 65536 bytes
+(including the signature), so we keep the JSON form of the operations well
+below that figure
+*/
+	exports.MAX_TRANSACTION_LENGTH = 60000;
+
+	/*
+Return the approximate size in characters of the wire form of an operation
+(the extension expects operations as ["type",{...}] pairs)
+*/
+	exports.getOperationSize = function(operation) {
+		var payload = {};
+		Object.keys(operation).forEach(function(name) {
+			if(name !== "type") {
+				payload[name] = operation[name];
+			}
+		});
+		return JSON.stringify([operation.type,payload]).length;
+	};
+
+	/*
 Tag that marks a tiddler that is a proposed change or a comment
 */
 	exports.COMMENT_TAG = "Proposed";
