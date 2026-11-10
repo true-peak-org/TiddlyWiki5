@@ -20,7 +20,8 @@ Usage:
 	var Widget = require("$:/core/modules/widgets/widget.js").widget,
 		HiveStore = require("$:/plugins/tiddlywiki/hive/hivestore.js").HiveStore,
 		HiveApi = require("$:/plugins/tiddlywiki/hive/hiveapi.js").HiveApi,
-		HiveKeychain = require("$:/plugins/tiddlywiki/hive/hivekeychain.js").HiveKeychain;
+		HiveKeychain = require("$:/plugins/tiddlywiki/hive/hivekeychain.js").HiveKeychain,
+		HiveLink = require("$:/plugins/tiddlywiki/hive/hivelink.js");
 
 	var HiveActionWidget = function(parseTreeNode,options) {
 		this.initialise(parseTreeNode,options);
@@ -46,6 +47,8 @@ Compute the internal state of the widget
 */
 	HiveActionWidget.prototype.execute = function() {
 		this.action = this.getAttribute("action","save");
+		this.author = this.getAttribute("author","");
+		this.canonical = this.getAttribute("canonical","no");
 		this.permlink = this.getAttribute("permlink","") || this.wiki.getTiddlerText("$:/config/tiddlywiki/hive/permalink") || "";
 		this.makeChildWidgets();
 	};
@@ -91,7 +94,28 @@ Invoke the action associated with this widget
 */
 	HiveActionWidget.prototype.invokeAction = function(triggeringWidget,event) {
 		var self = this,
-			store = this.createStore();
+			store = this.createStore(),
+			config = store.getConfig();
+		if(this.action === "link") {
+		// Load a single Hive post as a tiddler
+			HiveLink.loadPost(this.author,this.permlink,{wiki: this.wiki,rpc: config.rpc},function(err,result) {
+				if(err) {
+					store.setStatus("Error: " + err);
+					$tw.utils.error("Hive: " + err);
+					return;
+				}
+				store.setStatus(result.unchanged ?
+					("The Hive post @" + self.author + "/" + self.permlink + " is already up to date") :
+					("Loaded the Hive post @" + self.author + "/" + self.permlink + " as the tiddler " + result.title));
+				// The canonical url opens the wiki reader that the post belongs to
+				if(result.canonicalUrl && (self.canonical === "yes" || self.canonical === "true")) {
+					window.open(result.canonicalUrl,"_blank");
+				} else {
+					$tw.rootWidget.dispatchEvent({type: "tm-navigate",navigateTo: result.title});
+				}
+			});
+			return true;
+		}
 		if(this.action === "load") {
 			store.load(this.permlink,function(err) {
 				self.report(err);
@@ -106,5 +130,6 @@ Invoke the action associated with this widget
 
 	exports["action-hivesave"] = HiveActionWidget;
 	exports["action-hiveload"] = HiveActionWidget;
+	exports["action-hivelink"] = HiveActionWidget;
 
 })();

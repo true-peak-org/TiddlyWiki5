@@ -1,0 +1,41 @@
+title: $:/plugins/tiddlywiki/hive/hivelink
+tags: $:/tags/Macro
+caption: hivelink
+type: text/vnd.tiddlywiki
+
+\procedure hivelink(accountId,permlink,label,canonical:"no")
+<$reveal type="nomatch" text=<<label>> default="">
+<$button class="tc-btn-invisible tc-hivelink" tooltip="Load the post from the Hive blockchain as a tiddler">
+<$action-hivelink action="link" author=<<accountId>> permlink=<<permlink>> canonical=<<canonical>>/>
+<$text text=<<label>>/>
+</$button>
+</$reveal>
+<$reveal type="match" text=<<label>> default="">
+<$button class="tc-btn-invisible tc-hivelink" tooltip="Load the post from the Hive blockchain as a tiddler">
+<$action-hivelink action="link" author=<<accountId>> permlink=<<permlink>> canonical=<<canonical>>/>
+<$text text=<<permlink>>/>
+</$button>
+</$reveal>
+\end
+
+The `<<hivelink>>` procedure renders a button that is displayed as a hyperlink. Clicking it loads the Hive post at @@accountId/permlink as a tiddler of this wiki. Call it with the account and the permlink of the post:
+
+<<hivelink harvestmoon299 tw5_my_tiddlywikis_37d8cc783005062a>>
+
+or with an explicit label:
+
+<<hivelink harvestmoon299 tw5_my_tiddlywikis_37d8cc783005062a "Getting started">>
+
+* accountId: the account the post belongs to
+* permlink: the permlink of the post (or of the root post of the wiki: the replies are loaded with it)
+* label: optional label of the link, defaults to the permlink
+* canonical: optional, "yes" opens the ''canonical_url'' of the post instead of loading it if the post carries one
+
+* The loaded tiddler carries the tag ''$:/hive/external'', which the publish filter excludes, so that ''Save to Hive'' ignores it.
+* If the tiddler is already present then the version of the post is checked (the ''last_update'' attribute of its replies) and the tiddler is only reloaded when the post was updated afterwards.
+* The type of the tiddler is guided by the type declared in the ''json_metadata'' of the post; markdown is the default and anything that declares html (mixed html/markdown included) is served as ''text/html''.
+
+* The loaded tiddler carries the tag ''$:/hive/external'', which the publish filter excludes, so that ''Save to Hive'' ignores it.
+* If the tiddler is already present then the version of the post is checked (the ''last_update'' attribute of its replies) and the tiddler is only reloaded when the post was updated afterwards.
+* The type of the tiddler is guided by the type declared in the ''json_metadata'' of the post; markdown is the default and anything that declares html (mixed html/markdown included) is served as ''text/html''.
+* The optional ''label'' parameter names the link. The optional ''canonical'' parameter is ''yes'' or ''no'' (the default is ''no''): when the post carries a ''canonical_url'' in its json_metadata and ''canonical'' is "yes", the click opens that reader url instead of loading the post locally.
