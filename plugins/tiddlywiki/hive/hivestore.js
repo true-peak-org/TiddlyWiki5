@@ -71,7 +71,7 @@ Return the configuration of the plugin
 		var config = {
 			account: this.getConfigText("account",""),
 			rpc: this.getConfigText("rpc",HiveApi.DEFAULT_RPC),
-			category: this.getConfigText("category","tiddlywiki5"),
+			category: this.getConfigText("category","tiddlywiki"),
 			nesting: this.getConfigText("nesting","path"),
 			publishFilter: this.getConfigText("publish-filter","[is[tiddler]] -[prefix[$:/]] +[sort[title]]"),
 			frontEnd: this.getConfigText("front-end","https://hive.blog"),
@@ -357,17 +357,17 @@ have children of their own have to be fetched as well
 	};
 
 	/*
-Save the wiki to Hive. The callback is invoked with (err,result)
+Prepare the operations for saving the wiki to Hive. The callback is
+invoked with (err,operations,context). No keychain is required, so the
+result can also be used to review the operations before broadcasting
+them
 */
-	HiveStore.prototype.save = function(callback) {
+	HiveStore.prototype.prepareOperations = function(callback) {
 		var self = this,
 			config = this.getConfig();
 		callback = callback || function() {};
 		if(!config.account) {
 			return callback("No Hive account name has been configured. Please enter your Hive account name in the control panel.");
-		}
-		if(!this.keychain) {
-			return callback("The Hive Keychain browser extension is not available");
 		}
 		var wikiId = this.getWikiId(),
 			wikiTitle = this.getWikiTitle(),
@@ -389,32 +389,49 @@ Save the wiki to Hive. The callback is invoked with (err,result)
 						self.setStatus("");
 						return callback(err);
 					}
-					if(!operations.length) {
-						self.setStatus("Nothing to save, the post " + rootPermlink + " is up to date");
-						return callback(null,{permlink: rootPermlink,operations: 0});
-					}
-					self.broadcastOperations(config,operations,function(err,results) {
-						if(err) {
-							self.setStatus("");
-							return callback(err);
-						}
-						var state = self.getRemoteState() || {};
-						state.wikiid = wikiId;
-						state.permlink = rootPermlink;
-						state.url = self.getUrl(config,rootPermlink);
-						state.saved = $tw.utils.stringifyDate(new Date());
-						state.tiddlers = self.getPublishedTiddlers(wikiId,titles);
-						self.setRemoteState(state);
-						var statusText = "Saved " + operations.length + " operation(s) to " + self.getUrl(config,rootPermlink);
-						var overLimit = self.getOverLimitTiddlers() || [];
-						if(overLimit.length) {
-							// Warn about the tiddlers that would exceed the limits of a Hive post
-							statusText += " The following tiddler(s) exceeded the limits of a Hive post and were truncated: " + overLimit.join(", ");
-						}
-						self.setStatus(statusText);
-						callback(null,{permlink: rootPermlink,operations: operations.length,results: results,warnings: overLimit});
-					});
+					callback(null,operations,{config: config,wikiId: wikiId,wikiTitle: wikiTitle,rootPermlink: rootPermlink,titles: titles});
 				});
+			});
+		});
+	};
+
+	/*
+Save the wiki to Hive. The callback is invoked with (err,result)
+*/
+	HiveStore.prototype.save = function(callback) {
+		var self = this;
+		callback = callback || function() {};
+		if(!this.keychain) {
+			return callback("The Hive Keychain browser extension is not available");
+		}
+		this.prepareOperations(function(err,operations,context) {
+			if(err) {
+				return callback(err);
+			}
+			if(!operations.length) {
+				self.setStatus("Nothing to save, the post " + context.rootPermlink + " is up to date");
+				return callback(null,{permlink: context.rootPermlink,operations: 0});
+			}
+			self.broadcastOperations(context.config,operations,function(err,results) {
+				if(err) {
+					self.setStatus("");
+					return callback(err);
+				}
+				var state = self.getRemoteState() || {};
+				state.wikiid = context.wikiId;
+				state.permlink = context.rootPermlink;
+				state.url = self.getUrl(context.config,context.rootPermlink);
+				state.saved = $tw.utils.stringifyDate(new Date());
+				state.tiddlers = self.getPublishedTiddlers(context.wikiId,context.titles);
+				self.setRemoteState(state);
+				var statusText = "Saved " + operations.length + " operation(s) to " + self.getUrl(context.config,context.rootPermlink);
+				var overLimit = self.getOverLimitTiddlers() || [];
+				if(overLimit.length) {
+					// Warn about the tiddlers that would exceed the limits of a Hive post
+					statusText += " The following tiddler(s) exceeded the limits of a Hive post and were truncated: " + overLimit.join(", ");
+				}
+				self.setStatus(statusText);
+				callback(null,{permlink: context.rootPermlink,operations: operations.length,results: results,warnings: overLimit});
 			});
 		});
 	};
@@ -704,17 +721,15 @@ corresponding reply
 	};
 
 	/*
-Broadcast the operations, in batches of a limited size
+Split the operations into batches that both respect the maximum number of
+operations per transaction and fit within the maximum size of a
+transaction. A single operation that is bigger than the size limit is
+returned on its own, so that it is not blocked by the operations that
+precede it
 */
-	HiveStore.prototype.broadcastOperations = function(config,operations,callback) {
-		var self = this,
-			batches = [];
-		// Split the operations into batches that both respect the maximum
-		// number of operations per transaction and fit within the maximum
-		// size of a transaction. A single operation that is bigger than the
-		// size limit is broadcast on its own, so that it is not blocked by
-		// the operations that precede it
-		var opIndex = 0;
+	HiveStore.prototype.getOperationBatches = function(operations) {
+		var batches = [],
+			opIndex = 0;
 		while(opIndex < operations.length) {
 			var batchSize = 0,
 				count = 0;
@@ -729,7 +744,16 @@ Broadcast the operations, in batches of a limited size
 			batches.push(operations.slice(opIndex,opIndex + count));
 			opIndex += count;
 		}
-		var results = [],
+		return batches;
+	};
+
+	/*
+Broadcast the operations, in batches of a limited size
+*/
+	HiveStore.prototype.broadcastOperations = function(config,operations,callback) {
+		var self = this,
+			batches = this.getOperationBatches(operations),
+			results = [],
 			index = 0;
 		function next() {
 			if(index >= batches.length) {

@@ -23,6 +23,8 @@ property and, when something went wrong, an `error` property.
 	/*global $tw: false */
 	"use strict";
 
+	var util = require("$:/plugins/tiddlywiki/hive/hiveutil.js");
+
 	/*
 Construct a Keychain client
 */
@@ -126,13 +128,7 @@ form that the extension expects. The callback is invoked with (err,result)
 		}
 		try {
 			wireOperations = operations.map(function(operation) {
-				var payload = {};
-				Object.keys(operation).forEach(function(name) {
-					if(name !== "type") {
-						payload[name] = operation[name];
-					}
-				});
-				return [operation.type,payload];
+				return util.getWireOperation(operation);
 			});
 			api.requestBroadcast(username,wireOperations,method || "Posting",function(response) {
 				var err = self.getResponseError(response);

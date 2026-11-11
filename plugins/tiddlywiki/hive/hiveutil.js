@@ -40,17 +40,33 @@ below that figure
 	exports.MAX_TRANSACTION_LENGTH = 60000;
 
 	/*
-Return the approximate size in characters of the wire form of an operation
-(the extension expects operations as ["type",{...}] pairs)
+Return the wire form of an operation. The extension expects operations as
+["type",{...}] pairs, without the internal type property in the payload
 */
-	exports.getOperationSize = function(operation) {
+	exports.getWireOperation = function(operation) {
 		var payload = {};
 		Object.keys(operation).forEach(function(name) {
 			if(name !== "type") {
 				payload[name] = operation[name];
 			}
 		});
-		return JSON.stringify([operation.type,payload]).length;
+		return [operation.type,payload];
+	};
+
+	/*
+Return the approximate size in characters of the wire form of an operation
+*/
+	exports.getOperationSize = function(operation) {
+		return JSON.stringify(exports.getWireOperation(operation)).length;
+	};
+
+	/*
+Return the total size in characters of the wire form of a set of operations
+*/
+	exports.getBatchSize = function(operations) {
+		return (operations || []).reduce(function(size,operation) {
+			return size + exports.getOperationSize(operation);
+		},0);
 	};
 
 	/*

@@ -21,7 +21,8 @@ Usage:
 		HiveStore = require("$:/plugins/tiddlywiki/hive/hivestore.js").HiveStore,
 		HiveApi = require("$:/plugins/tiddlywiki/hive/hiveapi.js").HiveApi,
 		HiveKeychain = require("$:/plugins/tiddlywiki/hive/hivekeychain.js").HiveKeychain,
-		HiveLink = require("$:/plugins/tiddlywiki/hive/hivelink.js");
+		HiveLink = require("$:/plugins/tiddlywiki/hive/hivelink.js"),
+		util = require("$:/plugins/tiddlywiki/hive/hiveutil.js");
 
 	var HiveActionWidget = function(parseTreeNode,options) {
 		this.initialise(parseTreeNode,options);
@@ -46,11 +47,21 @@ Render this widget into the DOM
 Compute the internal state of the widget
 */
 	HiveActionWidget.prototype.execute = function() {
-		this.action = this.getAttribute("action","save");
+		this.action = this.getAttribute("action") || this.getDefaultAction();
 		this.author = this.getAttribute("author","");
 		this.canonical = this.getAttribute("canonical","no");
 		this.permlink = this.getAttribute("permlink","") || this.wiki.getTiddlerText("$:/config/tiddlywiki/hive/permalink") || "";
 		this.makeChildWidgets();
+	};
+
+	/*
+Return the action that matches the tag of the widget, so that
+<$action-hiveload/> means load even without an explicit action attribute
+*/
+	HiveActionWidget.prototype.getDefaultAction = function() {
+		var type = this.parseTreeNode ? this.parseTreeNode.type : "",
+			match = /^action-hive(\w+)$/.exec(type);
+		return match ? match[1] : "save";
 	};
 
 	/*
@@ -135,6 +146,16 @@ Invoke the action associated with this widget
 			store.load(this.permlink,function(err) {
 				self.report(err);
 			});
+		} else if(this.action === "inspect") {
+			// Prepare the operations of a save and show them in a preview
+			// tiddler, without broadcasting anything
+			store.prepareOperations(function(err,operations,context) {
+				if(err) {
+					self.report(err);
+					return;
+				}
+				self.showOperationPreview(store,operations,context,event);
+			});
 		} else {
 			store.save(function(err) {
 				self.report(err);
@@ -143,8 +164,65 @@ Invoke the action associated with this widget
 		return true;
 	};
 
+	/*
+Write the operations that a save would broadcast into a preview tiddler
+and open it. The operations are grouped into the transactions that would
+be sent to Keychain for signing
+*/
+	HiveActionWidget.prototype.showOperationPreview = function(store,operations,context,event) {
+		var title = "$:/hive/preview/operations",
+			text,
+			status;
+		if(operations.length) {
+			var transactions = store.getOperationBatches(operations).map(function(batch) {
+				return {
+					characters: util.getBatchSize(batch),
+					operations: batch.map(function(operation) {
+						return util.getWireOperation(operation);
+					})
+				};
+			});
+			text = JSON.stringify({
+				account: context.config.account,
+				method: "Posting",
+				transactionCount: transactions.length,
+				transactions: transactions
+			},null,2);
+			status = "Prepared " + operations.length + " operation(s) in " + transactions.length + " transaction(s) for review. Nothing has been broadcast.";
+		} else {
+			text = "Nothing to broadcast, the post " + context.rootPermlink + " is up to date";
+			status = text;
+		}
+		// The $:/ prefix and the external tag keep the preview out of the
+		// published tiddlers even if the publish filter is changed
+		store.wiki.addTiddler(new $tw.Tiddler({
+			title: title,
+			text: text,
+			type: "text/plain",
+			tags: ["$:/hive/external"]
+		}));
+		store.setStatus(status);
+		// Navigate from this widget so that the event bubbles up through
+		// the Navigator: it opens the preview in the story and scrolls it
+		// into view like a wikilink does
+		var rect = event && event.target && event.target.getBoundingClientRect && event.target.getBoundingClientRect();
+		this.dispatchEvent({
+			type: "tm-navigate",
+			navigateTo: title,
+			navigateFromClientRect: rect ? {
+				top: rect.top,
+				left: rect.left,
+				width: rect.width,
+				right: rect.right,
+				bottom: rect.bottom,
+				height: rect.height
+			} : undefined
+		});
+	};
+
 	exports["action-hivesave"] = HiveActionWidget;
 	exports["action-hiveload"] = HiveActionWidget;
 	exports["action-hivelink"] = HiveActionWidget;
+	exports["action-hiveinspect"] = HiveActionWidget;
 
 })();

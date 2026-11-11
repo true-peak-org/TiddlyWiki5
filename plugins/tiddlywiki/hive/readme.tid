@@ -14,11 +14,11 @@ Saves a wiki to [[https://hive.blog|Hive]] as a single post with one reply per t
 The wiki is published as:
 
 * one ''root post'' in the configured category — this is the wiki's Hive presence (the entry point). The standalone app (loaded via the hive-shim) should read this root post and load all tiddlers from its replies. The root post body is a readable index; the canonical wiki metadata is in `json_metadata.tw5`.
-* one ''reply'' per published tiddler, nested underneath the root post (or underneath the reply of its parent tiddler when the parent is given as a tag or when the nesting is set to ''path''). The HTML app shell does not need to be rewritten to update tiddlers — only replies are added/updated/marked removed. The root post may reference the app URL via the ''App URL'' setting.
+* one ''reply'' per published tiddler, all posted as direct replies of the root post. The tiddler hierarchy is not stored in the structure of the replies: the parent/child relations live in the `tw5` metadata of each reply instead. Loading scans the entire reply graph of the root post for tiddlers, so replies by other authors — such as an acceptance of a proposed tiddler — are picked up as well. The HTML app shell does not need to be rewritten to update tiddlers — only replies are added/updated/marked removed. The root post may reference the app URL via the ''App URL'' setting.
 
 !! Publishing
 
-Publishing is always explicit. Nothing is sent to the blockchain until the ''Save to Hive'' button in the control panel is pressed. The plugin first reads the current replies of the root post, compares them with the local tiddlers, and then broadcasts only the operations that are needed.
+Publishing is always explicit. Nothing is sent to the blockchain until the ''Save to Hive'' button in the control panel is pressed. The plugin first reads the current replies of the root post, compares them with the local tiddlers, and then broadcasts only the operations that are needed. The ''Review JSON'' button next to it shows the exact operations that a save would broadcast, without sending anything.
 
 !! Loading
 
@@ -44,8 +44,8 @@ Then open `http://localhost:8080` in a browser that has the Hive Keychain extens
 |!Setting |!Default |!Description |
 |Account | |The Hive account that publishes the wiki |
 |Endpoint |`https://api.hive.blog` |The JSON-RPC endpoint of the Hive blockchain |
-|Category |`tiddlywiki5` |The category of the root post |
-|Nesting |`path` |Whether the replies are nested by the parent tag of the tiddlers, or all directly underneath the root post |
+|Category |`tiddlywiki` |The primary category tag of the root post. Hive requires top level posts to have an empty `parent_author`, in which case `parent_permlink` acts as the primary category tag |
+|Nesting |`path` |The order in which the tiddlers are published and created: ''path'' publishes parent tiddlers before their children, determined from the parent tags of the tiddlers, ''flat'' keeps the filter order. The replies on Hive are always direct replies of the root post either way |
 |Published tiddlers |`[is[tiddler]] -[prefix[$:/]] +[sort[title]]` |The filter that selects the tiddlers that are published |
 |Front end |`https://hive.blog` |The base url of the Hive front end, used to build the links |
 |Pull mode |`overwrite` |Whether loading overwrites the existing tiddlers, or only adds the ones that are missing |

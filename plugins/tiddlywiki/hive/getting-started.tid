@@ -12,7 +12,7 @@ This is a minimal wiki for testing the Hive storage plugin.
 
 ! The tiddlers of this wiki
 
-The tiddlers of this wiki are published as one reply each, underneath the root post of the wiki. The tiddler ''Child'' is tagged with ''Home'' and is therefore nested underneath the reply of the ''Home'' tiddler.
+The tiddlers of this wiki are published as one reply each, all as direct replies of the root post of the wiki. The parent/child relations between the tiddlers are stored in the metadata of each reply, not in the structure of the replies on Hive.
 
 ! Loading a single post as a tiddler
 

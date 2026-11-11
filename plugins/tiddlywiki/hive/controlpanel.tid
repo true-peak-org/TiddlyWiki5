@@ -11,7 +11,7 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 |!Setting |!Value |
 |Account |<$edit-text tiddler="$:/config/tiddlywiki/hive/account" tag="input" default="" placeholder="your Hive account name"/> |
 |Endpoint |<$edit-text tiddler="$:/config/tiddlywiki/hive/rpc" tag="input" default="https://api.hive.blog"/> |
-|Category |<$edit-text tiddler="$:/config/tiddlywiki/hive/category" tag="input" default="tiddlywiki5"/> |
+|Category |<$edit-text tiddler="$:/config/tiddlywiki/hive/category" tag="input" default="tiddlywiki"/> |
 |Nesting |<$select tiddler="$:/config/tiddlywiki/hive/nesting" default="path"><option value="path">Nested by parent</option><option value="flat">Flat</option></$select> |
 |Published tiddlers |<$edit-text tiddler="$:/config/tiddlywiki/hive/publish-filter" tag="input" default="[is[tiddler]] -[prefix[$:/]] +[sort[title]]"/> |
 |Front end |<$edit-text tiddler="$:/config/tiddlywiki/hive/front-end" tag="input" default="https://hive.blog"/> |
@@ -20,7 +20,9 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 
 !! Publish
 
-<$button><$action-hivesave/> Save to Hive</$button>
+<$button><$action-hiveinspect/> Review JSON</$button> <$button><$action-hivesave/> Save to Hive</$button>
+
+''Review JSON'' shows the exact operations that a save would broadcast, grouped into the transactions that the Keychain extension would ask you to sign. Nothing is sent to the blockchain. Press ''Save to Hive'' afterwards to actually broadcast them.
 
 !! Load
 
