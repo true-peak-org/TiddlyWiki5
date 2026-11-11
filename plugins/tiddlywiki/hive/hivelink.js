@@ -62,12 +62,12 @@ afterwards.
 	}
 
 	/*
-	Strip the "_p<digits>" suffix of a part permlink. Returns the base
+	Strip the "-p<digits>" suffix of a part permlink. Returns the base
 	permlink and the part number
 	*/
 	function splitPartPermlink(permlink) {
-		var match = /^(.*?)(?:_p(\d+))?$/.exec(permlink);
-		if(!match || !match[2]) {
+		var match = /^(.*?)-p(\d+)$/.exec(permlink);
+		if(!match) {
 			return {base: permlink,part: 1};
 		}
 		return {base: match[1],part: parseInt(match[2],10)};
@@ -91,12 +91,12 @@ afterwards.
 	/*
 	Fetch all the part replies of a tiddler that was split over several
 	posts. The base permlink and the number of parts name the posts
-	"_p1.._pN"
+	"-p1..-pN"
 	*/
 	function fetchParts(api,author,basePermlink,count,partsMetadata) {
 		var permlinks = [];
 		for(var p = 1; p <= count; p++) {
-			permlinks.push(basePermlink + "_p" + p);
+			permlinks.push(basePermlink + "-p" + p);
 		}
 		return new Promise(function(resolve) {
 			var records = [],

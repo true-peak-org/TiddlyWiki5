@@ -125,43 +125,29 @@ Return a random identifier of 32 hexadecimal characters
 
 	/*
 Convert a string into something that is safe to use within a permlink.
-Hive does not allow dashes in permlinks, so words are separated by
-underscores. Underscores and hyphens inside the source text are encoded,
+The Hive blockchain only allows the lowercase letters, the digits and the
+hyphen in permlinks (an underscore is rejected with an assert exception),
+so words are separated by hyphens and every other character is replaced
+by a hyphen as well. The hash suffix of the generated permlinks keeps the
+results unique even when different titles collapse to the same slug
 */
 	exports.slugify = function(text,maxLength) {
-		var result = "",
-			i,
-			charCode;
+		var result = String(text === undefined || text === null ? "" : text);
 		maxLength = maxLength || 40;
-		text = String(text);
-		for(i = 0; i < text.length; i++) {
-			charCode = text.charCodeAt(i);
-			if(charCode >= 48 && charCode <= 57) { // digits
-				result += text.charAt(i);
-			} else if(charCode >= 65 && charCode <= 90) { // uppercase
-				result += text.charAt(i).toLowerCase();
-			} else if(charCode >= 97 && charCode <= 122) { // lowercase
-				result += text.charAt(i);
-			} else if(charCode === 32) { // space
-				result += "_";
-			} else if(charCode === 45) { // hyphen - encode to avoid collision with the word separator
-				result += "_h";
-			} else if(charCode === 95) { // underscore - encode to avoid collision with the word separator
-				result += "_u";
-			} else {
-				result += "_";
-			}
-		}
-		// Collapse multiple separators
-		result = result.replace(/_+/g,"_");
-		while(result.length > 1 && result.charAt(result.length - 1) === "_") {
+		result = result.toLowerCase();
+		result = result.replace(/[^a-z0-9]+/g,"-");
+		result = result.replace(/-+/g,"-");
+		while(result.charAt(result.length - 1) === "-") {
 			result = result.substring(0,result.length - 1);
 		}
-		while(result.length > 1 && result.charAt(0) === "_") {
+		while(result.charAt(0) === "-") {
 			result = result.substring(1);
 		}
 		if(result.length > maxLength) {
 			result = result.substring(0,maxLength);
+		}
+		while(result.charAt(result.length - 1) === "-") {
+			result = result.substring(0,result.length - 1);
 		}
 		if(!result) {
 			result = "tiddler";
@@ -173,14 +159,14 @@ underscores. Underscores and hyphens inside the source text are encoded,
 Return the permlink used for the root post of a wiki
 */
 	exports.getRootPermlink = function(wikiId,wikiTitle) {
-		return "tw5_" + exports.slugify(wikiTitle || "wiki") + "_" + exports.hashString(wikiId);
+		return "tw5-" + exports.slugify(wikiTitle || "wiki") + "-" + exports.hashString(wikiId);
 	};
 
 	/*
 Return the permlink used for the reply that holds a tiddler
 */
 	exports.getTiddlerPermlink = function(wikiId,title) {
-		return "tw5_" + exports.slugify(title) + "_" + exports.hashString(wikiId + "|" + title);
+		return "tw5-" + exports.slugify(title) + "-" + exports.hashString(wikiId + "|" + title);
 	};
 
 	/*
@@ -188,7 +174,7 @@ Return the permlink used for one part of a tiddler that had to be split
 over several replies
 */
 	exports.getPartPermlink = function(permlink,part) {
-		return permlink + "_p" + part;
+		return permlink + "-p" + part;
 	};
 
 	/*
