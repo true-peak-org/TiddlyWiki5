@@ -40,6 +40,14 @@ below that figure
 	exports.MAX_TRANSACTION_LENGTH = 60000;
 
 	/*
+Minimum pause in milliseconds between two transactions that create
+comments. The chain enforces HIVE_MIN_REPLY_INTERVAL of 3 seconds between
+the comments of an account, we wait a bit longer to absorb clock and
+processing differences
+*/
+	exports.MIN_REPLY_INTERVAL = 3500;
+
+	/*
 Return the wire form of an operation. The extension expects operations as
 ["type",{...}] pairs, without the internal type property in the payload
 */

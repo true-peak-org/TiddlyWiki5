@@ -748,7 +748,9 @@ precede it
 	};
 
 	/*
-Broadcast the operations, in batches of a limited size
+Broadcast the operations, in batches of a limited size. The chain only
+accepts one comment per account every few seconds (HIVE_MIN_REPLY_INTERVAL),
+so a pause is inserted between the transactions
 */
 	HiveStore.prototype.broadcastOperations = function(config,operations,callback) {
 		var self = this,
@@ -767,7 +769,13 @@ Broadcast the operations, in batches of a limited size
 					return callback(err);
 				}
 				results.push(result);
-				next();
+				// Wait for the reply interval of the chain before the next
+				// transaction, and finish immediately after the last one
+				if(index < batches.length) {
+					setTimeout(next,util.MIN_REPLY_INTERVAL);
+				} else {
+					next();
+				}
 			});
 		}
 		next();
