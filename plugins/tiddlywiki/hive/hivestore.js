@@ -721,61 +721,73 @@ corresponding reply
 	};
 
 	/*
-Split the operations into batches that both respect the maximum number of
-operations per transaction and fit within the maximum size of a
-transaction. A single operation that is bigger than the size limit is
-returned on its own, so that it is not blocked by the operations that
-precede it
+Wait until the reply interval of the chain has elapsed since the last
+comment of the account, so that the next transaction that creates a
+comment is accepted. The chain rejects a comment when less than
+HIVE_MIN_REPLY_INTERVAL of 3 seconds have passed since the previous one,
+which also applies after a save that failed halfway through. The callback
+is invoked when it is safe to broadcast
 */
-	HiveStore.prototype.getOperationBatches = function(operations) {
-		var batches = [],
-			opIndex = 0;
-		while(opIndex < operations.length) {
-			var batchSize = 0,
-				count = 0;
-			while(opIndex + count < operations.length) {
-				var opSize = util.getOperationSize(operations[opIndex + count]);
-				if(count > 0 && (count >= util.MAX_OPS_PER_TRANSACTION || batchSize + opSize > util.MAX_TRANSACTION_LENGTH)) {
-					break;
-				}
-				batchSize += opSize;
-				count++;
-			}
-			batches.push(operations.slice(opIndex,opIndex + count));
-			opIndex += count;
+	HiveStore.prototype.waitReplyInterval = function(config,callback) {
+		var self = this;
+		if(!this.api || !config.account) {
+			return callback();
 		}
-		return batches;
+		this.api.getAccounts([config.account],function(err,accounts) {
+			var account = (!err && accounts && accounts.length) ? accounts[0] : null,
+				text = account ? account.last_post : "",
+				// The chain timestamps are utc, without a timezone suffix
+				last = text ? Date.parse(/(?:Z|[+-]\d\d:?\d\d)$/.test(text) ? text : text + "Z") : NaN;
+			if(isNaN(last)) {
+				return callback();
+			}
+			var remaining = util.MIN_REPLY_INTERVAL - (Date.now() - last);
+			if(remaining > 0) {
+				self.setStatus("Waiting " + Math.ceil(remaining / 1000) + " second(s) until the chain accepts the next comment...");
+				setTimeout(callback,remaining);
+			} else {
+				callback();
+			}
+		});
 	};
 
 	/*
-Broadcast the operations, in batches of a limited size. The chain only
-accepts one comment per account every few seconds (HIVE_MIN_REPLY_INTERVAL),
-so a pause is inserted between the transactions
+Broadcast the operations, one transaction per operation: the chain rejects
+a transaction that creates more than one comment with the reply interval
+assert, so the operations cannot be packed together. Before each
+transaction the last comment of the account is checked, so that a save
+retried shortly after a failed one does not collide with it
 */
 	HiveStore.prototype.broadcastOperations = function(config,operations,callback) {
 		var self = this,
-			batches = this.getOperationBatches(operations),
-			results = [],
-			index = 0;
+			index = 0,
+			results = [];
 		function next() {
-			if(index >= batches.length) {
+			if(index >= operations.length) {
 				return callback(null,results);
 			}
-			var batch = batches[index];
-			index++;
-			self.setStatus("Broadcasting transaction " + index + " of " + batches.length + "...");
-			self.keychain.broadcast(config.account,batch,"Posting",function(err,result) {
-				if(err) {
-					return callback(err);
-				}
-				results.push(result);
-				// Wait for the reply interval of the chain before the next
-				// transaction, and finish immediately after the last one
-				if(index < batches.length) {
-					setTimeout(next,util.MIN_REPLY_INTERVAL);
-				} else {
-					next();
-				}
+			var operation = operations[index],
+				size = util.getOperationSize(operation);
+			if(size > util.MAX_TRANSACTION_LENGTH) {
+				return callback("The operation " + operation.permlink + " is " + size + " characters long and does not fit into a Hive transaction");
+			}
+			self.waitReplyInterval(config,function() {
+				index++;
+				self.setStatus("Broadcasting transaction " + index + " of " + operations.length + "...");
+				self.keychain.broadcast(config.account,[operation],"Posting",function(err,result) {
+					if(err) {
+						return callback(err);
+					}
+					results.push(result);
+					// Wait for the reply interval of the chain before the
+					// next transaction, and finish immediately after the
+					// last one
+					if(index < operations.length) {
+						setTimeout(next,util.MIN_REPLY_INTERVAL);
+					} else {
+						next();
+					}
+				});
 			});
 		}
 		next();

@@ -27,9 +27,12 @@ Maximum length of a post title. Hive accepts titles of up to 256 bytes
 	exports.MAX_TITLE_LENGTH = 200;
 
 	/*
-Maximum number of operations in a single transaction
+Maximum number of operations in a single transaction. The chain rejects a
+transaction that creates more than one comment with the reply interval
+assert, so comments are broadcast one per transaction and this limit only
+applies to future non comment operation types
 */
-	exports.MAX_OPS_PER_TRANSACTION = 10;
+	exports.MAX_OPS_PER_TRANSACTION = 1;
 
 	/*
 Maximum total size of the operations in a single transaction. The blockchain
@@ -37,15 +40,25 @@ rejects transactions whose serialized form is longer than 65536 bytes
 (including the signature), so we keep the JSON form of the operations well
 below that figure
 */
+	/*
+Maximum total size of the operations in a single transaction. The blockchain
+rejects transactions whose serialized form is longer than 65536 bytes
+(including the signature), so we keep the JSON form of the operations well
+below that figure. Every comment operation is broadcast in its own
+transaction anyway, because the chain rejects transactions that create
+more than one comment
+*/
 	exports.MAX_TRANSACTION_LENGTH = 60000;
 
 	/*
-Minimum pause in milliseconds between two transactions that create
-comments. The chain enforces HIVE_MIN_REPLY_INTERVAL of 3 seconds between
-the comments of an account, we wait a bit longer to absorb clock and
-processing differences
+Minimum pause in milliseconds between two comments of the same account.
+The chain enforces HIVE_MIN_REPLY_INTERVAL of 3 seconds between the
+comments, and the check applies to the operations of a single transaction
+as well, so a transaction may not create more than one comment. The chain
+timestamps have a resolution of one second, so we wait 4 seconds to stay
+clear of the limit
 */
-	exports.MIN_REPLY_INTERVAL = 3500;
+	exports.MIN_REPLY_INTERVAL = 4000;
 
 	/*
 Return the wire form of an operation. The extension expects operations as

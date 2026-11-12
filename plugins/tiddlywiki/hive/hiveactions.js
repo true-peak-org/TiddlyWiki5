@@ -174,12 +174,12 @@ be sent to Keychain for signing
 			text,
 			status;
 		if(operations.length) {
-			var transactions = store.getOperationBatches(operations).map(function(batch) {
+			// Every operation is broadcast in its own transaction, the chain
+			// rejects a transaction that creates more than one comment
+			var transactions = operations.map(function(operation) {
 				return {
-					characters: util.getBatchSize(batch),
-					operations: batch.map(function(operation) {
-						return util.getWireOperation(operation);
-					})
+					characters: util.getOperationSize(operation),
+					operations: [util.getWireOperation(operation)]
 				};
 			});
 			text = JSON.stringify({

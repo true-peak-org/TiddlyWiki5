@@ -206,6 +206,20 @@ Look up an account. The callback is invoked with (err,account)
 		});
 	};
 
+	/*
+Retrieve the full account objects of the given account names, which hold
+bookkeeping attributes such as the time of the last comment. The callback
+is invoked with (err,accounts)
+*/
+	HiveApi.prototype.getAccounts = function(names,callback) {
+		this.request("condenser_api.get_accounts",[names],function(err,result) {
+			if(err) {
+				return callback(err);
+			}
+			callback(null,result || []);
+		});
+	};
+
 	HiveApi.prototype.log = function(message) {
 		if(this.logger) {
 			this.logger.log(message);

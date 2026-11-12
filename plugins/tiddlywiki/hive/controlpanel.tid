@@ -22,7 +22,7 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 
 <$button><$action-hiveinspect/> Review JSON</$button> <$button><$action-hivesave/> Save to Hive</$button>
 
-''Review JSON'' shows the exact operations that a save would broadcast, grouped into the transactions that the Keychain extension would ask you to sign. Nothing is sent to the blockchain. Press ''Save to Hive'' afterwards to actually broadcast them.
+''Review JSON'' shows the exact operations that a save would broadcast, grouped into the transactions that the Keychain extension would ask you to sign. Nothing is sent to the blockchain. Press ''Save to Hive'' afterwards to actually broadcast them. Each tiddler reply is broadcast as its own transaction, so a save asks for one Keychain confirmation per changed tiddler, with a few seconds of pause in between as required by the chain.
 
 !! Load
 

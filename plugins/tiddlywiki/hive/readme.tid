@@ -18,7 +18,7 @@ The wiki is published as:
 
 !! Publishing
 
-Publishing is always explicit. Nothing is sent to the blockchain until the ''Save to Hive'' button in the control panel is pressed. The plugin first reads the current replies of the root post, compares them with the local tiddlers, and then broadcasts only the operations that are needed. The ''Review JSON'' button next to it shows the exact operations that a save would broadcast, without sending anything.
+Publishing is always explicit. Nothing is sent to the blockchain until the ''Save to Hive'' button in the control panel is pressed. The plugin first reads the current replies of the root post, compares them with the local tiddlers, and then broadcasts only the operations that are needed. The ''Review JSON'' button next to it shows the exact operations that a save would broadcast, without sending anything. Every operation is broadcast in its own transaction: the blockchain rejects a transaction that creates more than one comment, and it only accepts a comment every few seconds, so a save asks for one Keychain confirmation per changed tiddler.
 
 !! Loading
 
