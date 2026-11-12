@@ -27,6 +27,10 @@ exports.startup = function() {
 		store = new HiveStore({wiki: $tw.wiki}),
 		config = store.getConfig();
 	store.api = new HiveApi({rpc: config.rpc});
+	// The rooted view is a reader view of the published wiki, the sidebar
+	// of the standalone shell is not part of it. Set before the load, so
+	// that the sidebar does not flash while the chain is read
+	$tw.wiki.addTiddler({title: "$:/state/sidebar",text: "no"});
 	// Snapshot the non system tiddlers that the shell was packaged with,
 	// so that after the load the defaults that the published wiki does
 	// not contain can be removed
