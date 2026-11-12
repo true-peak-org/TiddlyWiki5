@@ -66,6 +66,9 @@ exports.startup = function() {
 		var open = $tw.wiki.getTiddler("Home") ? ["Home"] : [];
 		$tw.wiki.addTiddler({title: "$:/DefaultTiddlers",text: $tw.utils.stringifyList(open)});
 		$tw.wiki.addTiddler({title: "$:/StoryList",list: open});
+		// Pin the location of the wiki in the settings, so that a save
+		// operates on this wiki and a load with an empty field reloads it
+		$tw.wiki.addTiddler(new $tw.Tiddler({title: "$:/config/tiddlywiki/hive/permalink",text: "@" + root.author + "/" + root.permlink}));
 		$tw.utils.log("Hive: " + store.getStatusText());
 	});
 };

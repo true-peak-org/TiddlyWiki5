@@ -20,9 +20,11 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 
 !! Publish
 
-<$button><$action-hiveinspect/> Review JSON</$button> <$button><$action-hivesave/> Save to Hive</$button>
+<$button><$action-hiveinspect/> Review JSON</$button> <$button><$action-hivesave/> Save to Hive</$button> <$button><$action-hivenew/> New wiki</$button>
 
-''Review JSON'' shows the exact operations that a save would broadcast, grouped into the transactions that the Keychain extension would ask you to sign. Nothing is sent to the blockchain. Press ''Save to Hive'' afterwards to actually broadcast them. Each tiddler reply is broadcast as its own transaction, so a save asks for one Keychain confirmation per changed tiddler, with a few seconds of pause in between as required by the chain.
+''Review JSON'' shows the exact operations that a save would broadcast, grouped into the transactions that the Keychain extension would ask you to sign. Nothing is sent to the blockchain. Press ''Save to Hive'' afterwards to actually broadcast them. Each tiddler reply is broadcast as its own transaction, so a save asks for one Keychain confirmation per changed tiddler, with a few seconds of pause in between as required by the chain. ''New wiki'' forgets the wiki that is currently loaded or saved, so that the next save publishes a new root post to the configured account.
+
+''Save to Hive'' always operates on the wiki that has been loaded last: when the configured account is not the owner of that wiki, the changes are broadcast as proposals that the owner can approve, and the root post of the wiki is not touched.
 
 !! Load
 
@@ -30,7 +32,7 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 
 <$button><$action-hiveload/> Load from Hive</$button>
 
-''Load from Hive'' reads the root post and all of its replies and adds their tiddlers to the wiki. The permlink of the root post can be given as the bare permlink, as @author/permlink or as the full url of the post. When an author is given it is loaded instead of the configured account.
+''Load from Hive'' reads the root post and all of its replies and adds their tiddlers to the wiki, and it pins that wiki: a save afterwards operates on it, and a load with an empty field reloads it. The permlink of the root post can be given as the bare permlink, as @author/permlink or as the full url of the post. When an author is given it is loaded instead of the configured account. To work on another wiki, enter its @author/permlink here and press ''Load from Hive''; to start a fresh wiki under the configured account, press ''New wiki''.
 
 ''Status:'' <$list filter="[[$:/state/tiddlywiki/hive/status]get[text]]" variable="ignore"><$text text=<<ignore>>/></$list>
 

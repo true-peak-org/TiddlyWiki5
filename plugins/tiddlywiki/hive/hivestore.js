@@ -373,27 +373,38 @@ them
 		if(!config.account) {
 			return callback("No Hive account name has been configured. Please enter your Hive account name in the control panel.");
 		}
-		var wikiId = this.getWikiId(),
+		// The wiki that is operated on is the wiki of the last load: its
+		// root post belongs to the account that published it, which may
+		// be a different account than the configured one. A wiki that has
+		// never been loaded is the wiki of the configured account
+		var remote = this.getRemoteState() || {},
+			owner = remote.author || config.account,
+			wikiId = remote.wikiid || this.getWikiId(),
 			wikiTitle = this.getWikiTitle(),
-			rootPermlink = this.getRootPermlink(wikiId,wikiTitle),
+			rootPermlink = remote.permlink || util.getRootPermlink(wikiId,wikiTitle),
 			titles = this.getPublishTitles(config);
 		this.setStatus("Reading the current state of the post " + rootPermlink + "...");
-		this.api.getContent(config.account,rootPermlink,function(err,rootContent) {
+		this.api.getContent(owner,rootPermlink,function(err,rootContent) {
 			if(err) {
 				self.setStatus("");
 				return callback(err);
 			}
-			self.getAllReplies(config.account,rootPermlink,function(err,replies) {
+			self.getAllReplies(owner,rootPermlink,function(err,replies) {
 				if(err) {
 					self.setStatus("");
 					return callback(err);
 				}
-				self.buildOperations(config,wikiId,wikiTitle,rootPermlink,rootContent,replies,titles,function(err,operations) {
+				var chainAuthor = rootContent ? String(rootContent.author || "").toLowerCase() : null,
+					// The author of the chain post is authoritative, but the
+					// pinned author is kept when the chain has no root post,
+					// for example when the wiki has not been published yet
+					effectiveOwner = chainAuthor || owner;
+				self.buildOperations(config,effectiveOwner,wikiId,wikiTitle,rootPermlink,rootContent,replies,titles,function(err,operations,mode) {
 					if(err) {
 						self.setStatus("");
 						return callback(err);
 					}
-					callback(null,operations,{config: config,wikiId: wikiId,wikiTitle: wikiTitle,rootPermlink: rootPermlink,titles: titles});
+					callback(null,operations,{config: config,owner: effectiveOwner,wikiId: wikiId,wikiTitle: wikiTitle,rootPermlink: rootPermlink,titles: titles,mode: mode});
 				});
 			});
 		});
@@ -421,6 +432,29 @@ Save the wiki to Hive. The callback is invoked with (err,result)
 					self.setStatus("");
 					return callback(err);
 				}
+				if(context.mode === "propose") {
+				// The changes were broadcast as proposals for the owner of
+				// the wiki. Record them, so that a save that is retried
+				// before the chain has indexed the proposals does not
+				// propose the same content again. The state of the wiki
+				// itself is not changed: the wiki still belongs to its owner
+					var state = self.getRemoteState() || {};
+					state.proposals = state.proposals || {};
+					operations.forEach(function(operation) {
+						var metadata = self.getTw5Metadata(operation);
+						if(metadata && metadata.hash) {
+							state.proposals[metadata.hash] = metadata.title;
+						}
+					});
+					self.setRemoteState(state);
+					var proposeText = "Proposed " + operations.length + " change(s) to the wiki of @" + context.owner + ". The owner can approve the proposals and publish them.";
+					var proposeOverLimit = self.getOverLimitTiddlers() || [];
+					if(proposeOverLimit.length) {
+						proposeText += " The following tiddler(s) exceeded the limits of a Hive post and were truncated: " + proposeOverLimit.join(", ");
+					}
+					self.setStatus(proposeText);
+					return callback(null,{permlink: context.rootPermlink,operations: operations.length,results: results,proposed: true,warnings: proposeOverLimit});
+				}
 				var state = self.getRemoteState() || {};
 				state.wikiid = context.wikiId;
 				state.permlink = context.rootPermlink;
@@ -438,6 +472,22 @@ Save the wiki to Hive. The callback is invoked with (err,result)
 				callback(null,{permlink: context.rootPermlink,operations: operations.length,results: results,warnings: overLimit});
 			});
 		});
+	};
+
+	/*
+Start a new wiki: forget the wiki that has been loaded or saved, so that
+the next save publishes a new root post to the configured account. The
+wiki id is regenerated, because a permlink of an account can only be used
+once on the chain. The callback is invoked with (err)
+*/
+	HiveStore.prototype.newWiki = function(callback) {
+		var config = this.getConfig();
+		callback = callback || function() {};
+		this.wiki.deleteTiddler(REMOTE_TIDDLER);
+		this.wiki.deleteTiddler(CONFIG_PREFIX + "permalink");
+		this.wiki.addTiddler(new $tw.Tiddler({title: CONFIG_PREFIX + "wiki-id",text: util.generateId()}));
+		this.setStatus("New wiki: the next save publishes a new root post to the account " + (config.account || "(no account configured)"));
+		callback(null,{account: config.account});
 	};
 
 	/*
@@ -506,18 +556,36 @@ title
 	};
 
 	/*
-Build the list of operations that have to be broadcast
+Build the list of operations that have to be broadcast. The owner is the
+account that published the root post of the wiki. When the configured
+account is not the owner, the changes are not broadcast as replies of the
+wiki but as proposals, and the root post and the deletions are left to
+the owner. The callback is invoked with (err,operations,mode)
 */
-	HiveStore.prototype.buildOperations = function(config,wikiId,wikiTitle,rootPermlink,rootContent,replies,titles,callback) {
+	HiveStore.prototype.buildOperations = function(config,owner,wikiId,wikiTitle,rootPermlink,rootContent,replies,titles,callback) {
 		var self = this,
 			operations = [],
 			existing = {},
 			index = {},
+			proposed = {},
+			// The configured account signs the transactions. When it is
+			// not the owner of the wiki, the changes can only be proposed
+			propose = Boolean(owner && String(owner).toLowerCase() !== String(config.account).toLowerCase()),
 			state = this.getRemoteState() || {},
 			published = state.tiddlers || {},
+			proposalsRecorded = state.proposals || {},
 			overLimit = [];
 		(replies || []).forEach(function(reply) {
 			existing[reply.permlink] = reply;
+			// Record the proposals that the configured account has
+			// already broadcast, so that a save does not propose the same
+			// content again
+			if(reply.author === config.account) {
+				var metadata = self.getTw5Metadata(reply);
+				if(metadata && metadata.type === "proposal" && metadata.hash && metadata.title) {
+					proposed[metadata.hash] = metadata.title;
+				}
+			}
 		});
 		// Work out the content of each tiddler
 		var entries = {},
@@ -573,6 +641,41 @@ Build the list of operations that have to be broadcast
 						return;
 					}
 				}
+				if(propose) {
+				// The configured account is not the owner of the wiki. The
+				// change is broadcast as a proposal, which the owner can
+				// approve. A proposal is a single reply that carries the
+				// whole content of the tiddler, and it is addressed to the
+				// reply of the tiddler, or to the root post when the
+				// tiddler has no reply yet
+					var payloadHash = util.getPayloadHash(payload);
+					if(proposed[payloadHash] === entry.title || proposalsRecorded[payloadHash] === entry.title) {
+					// This content has been proposed already
+						return;
+					}
+					var proposalPermlink = util.getProposalPermlink(entry.permlink,payloadHash),
+						proposalCanonicalUrl = self.makeCanonicalUrl(config,rootPermlink,entry.title);
+					operations.push({
+						type: "comment",
+						parent_author: owner,
+						parent_permlink: existingReply ? existingReply.permlink : rootPermlink,
+						author: config.account,
+						permlink: proposalPermlink,
+						title: util.makeTitle("Proposal: " + entry.title),
+						body: util.makeProposalBody(entry.title,{frontEnd: config.frontEnd,canonicalUrl: proposalCanonicalUrl}),
+						json_metadata: JSON.stringify({app: "tw5",canonical_url: proposalCanonicalUrl,tw5: {
+							type: "proposal",
+							title: entry.title,
+							text: String(payload.text || ""),
+							fields: payload.fields || {},
+							tags: payload.tags || [],
+							created: payload.created || "",
+							modified: payload.modified || "",
+							hash: payloadHash
+						}})
+					});
+					return;
+				}
 				var body = util.makeTiddlerBody(part,{
 						frontEnd: config.frontEnd,
 						canonicalUrl: canonicalUrl,
@@ -602,33 +705,37 @@ Build the list of operations that have to be broadcast
 				}
 			});
 		});
-		// The operations for the tiddlers that have been deleted
-		Object.keys(existing).forEach(function(permlink) {
-			var metadata = self.getTw5Metadata(existing[permlink]);
-			if(!util.isTiddlerMetadata(metadata)) {
-				return;
-			}
-			if(index[metadata.title]) {
-				return;
-			}
-			operations.push({
-				type: "comment",
-				parent_author: config.account,
-				parent_permlink: rootPermlink,
-				author: config.account,
-				permlink: permlink,
-				title: util.makeTitle(metadata.title + " (removed)"),
-				body: "> **Note:** This tiddler has been removed from the wiki that this post belongs to.",
-				json_metadata: JSON.stringify({app: "tw5",canonical_url: self.makeCanonicalUrl(config,rootPermlink,metadata.title),tw5: {
-					type: "tiddler",
-					title: metadata.title,
-					deleted: true,
-					part: metadata.part || 1,
-					parts: metadata.parts || 1,
-					hash: util.hashString("deleted|" + metadata.title)
-				}})
+		// The operations for the tiddlers that have been deleted. A non
+		// owner cannot delete the tiddlers of a wiki, the owner has to do
+		// that
+		if(!propose) {
+			Object.keys(existing).forEach(function(permlink) {
+				var metadata = self.getTw5Metadata(existing[permlink]);
+				if(!util.isTiddlerMetadata(metadata)) {
+					return;
+				}
+				if(index[metadata.title]) {
+					return;
+				}
+				operations.push({
+					type: "comment",
+					parent_author: config.account,
+					parent_permlink: rootPermlink,
+					author: config.account,
+					permlink: permlink,
+					title: util.makeTitle(metadata.title + " (removed)"),
+					body: "> **Note:** This tiddler has been removed from the wiki that this post belongs to.",
+					json_metadata: JSON.stringify({app: "tw5",canonical_url: self.makeCanonicalUrl(config,rootPermlink,metadata.title),tw5: {
+						type: "tiddler",
+						title: metadata.title,
+						deleted: true,
+						part: metadata.part || 1,
+						parts: metadata.parts || 1,
+						hash: util.hashString("deleted|" + metadata.title)
+					}})
+				});
 			});
-		});
+		}
 		// The operation for the root post
 		var root = {
 			type: "root",
@@ -646,7 +753,9 @@ Build the list of operations that have to be broadcast
 		});
 		root.hash = util.getPayloadHash(root.index);
 		var remoteRoot = rootContent ? self.getTw5Metadata(rootContent) : null;
-		if(!rootContent || !remoteRoot || remoteRoot.hash !== root.hash) {
+		// A non owner never touches the root post of the wiki: the root
+		// post can only be broadcast by the account that owns it
+		if(!propose && (!rootContent || !remoteRoot || remoteRoot.hash !== root.hash)) {
 			var canonicalUrl = self.makeCanonicalUrl(config,rootPermlink);
 			// The root url carries no uri fragment
 			operations.unshift({
@@ -694,7 +803,7 @@ Build the list of operations that have to be broadcast
 		});
 		ordered = rootOperation ? [rootOperation].concat(tiddlerOperations) : tiddlerOperations;
 		self.overLimitTitles = overLimit;
-		callback(null,ordered);
+		callback(null,ordered,propose ? "propose" : "publish");
 	};
 
 	/*
@@ -881,14 +990,21 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 	HiveStore.prototype.load = function(permlink,callback) {
 		var self = this,
 			config = this.getConfig(),
+			remote = this.getRemoteState() || {},
 			// The permlink may be given as a bare permlink, as
 			// @author/permlink or as a full url of the post. An author
 			// given with the permlink is read instead of the configured
 			// account, so that the wiki of another account can be loaded
 			parsed = util.parsePermlink(permlink),
-			author = (parsed && parsed.author) || config.account;
+			author;
 		callback = callback || function() {};
-		permlink = parsed ? parsed.permlink : (this.getRemoteState() || {}).permlink;
+		if(parsed) {
+			author = parsed.author || remote.author || config.account;
+			permlink = parsed.permlink;
+		} else {
+			author = remote.author || config.account;
+			permlink = remote.permlink;
+		}
 		if(!author) {
 			return callback("No Hive account name has been configured. Please enter your Hive account name in the control panel.");
 		}
@@ -922,6 +1038,7 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 					}
 					var previousState = self.getRemoteState() || {};
 					self.setRemoteState({
+						author: author,
 						wikiid: metadata.wikiid,
 						permlink: permlink,
 						url: self.getUrl(config,permlink,author),

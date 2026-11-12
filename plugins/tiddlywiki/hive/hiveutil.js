@@ -199,6 +199,16 @@ over several replies
 	};
 
 	/*
+Return the permlink used for a proposal of a tiddler. The proposal is a
+reply that a non owner of the wiki broadcasts to propose a change, and it
+carries the hash of the proposed content, so that every proposal of a
+tiddler has its own permlink
+*/
+	exports.getProposalPermlink = function(tiddlerPermlink,hash) {
+		return tiddlerPermlink + "-prop-" + exports.hashString(hash).substring(0,16);
+	};
+
+	/*
 Return the JSON representation of a value with the object keys sorted so
 that the result is stable
 */
@@ -585,6 +595,24 @@ json_metadata of the post
 			body = body.substring(0,exports.MAX_BODY_LENGTH) + "\n\n> *(the body of this post was truncated, the complete text is in the metadata)*";
 		}
 		return body;
+	};
+
+	/*
+Return the body of a proposal reply. The proposal is a reply that a non
+owner of a wiki broadcasts to propose a change to a tiddler, the proposed
+content is kept in the json_metadata of the reply
+*/
+	exports.makeProposalBody = function(title,options) {
+		options = options || {};
+		var lines = [];
+		lines.push("> **Note:** This reply proposes a change to the tiddler **" + title + "** of a wiki published from [TiddlyWiki5](https://tiddlywiki.com).");
+		lines.push("> The proposed content is stored in the `tw5` metadata of this reply. Only the owner of the wiki");
+		if(options.canonicalUrl) {
+			lines.push("> can publish it; this wiki can be read in a [TiddlyWiki5 reader](" + options.canonicalUrl + ").");
+		} else {
+			lines.push("> can publish it; this wiki can be read in a TiddlyWiki5 reader.");
+		}
+		return lines.join("\n");
 	};
 
 	/*

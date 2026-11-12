@@ -142,7 +142,13 @@ Invoke the action associated with this widget
 			});
 			return true;
 		}
-		if(this.action === "load") {
+		if(this.action === "new") {
+		// Start a new wiki: forget the loaded or saved wiki so that the
+		// next save publishes a new root post to the configured account
+			store.newWiki(function(err) {
+				self.report(err);
+			});
+		} else if(this.action === "load") {
 			store.load(this.permlink,function(err) {
 				self.report(err);
 			});
@@ -184,6 +190,8 @@ be sent to Keychain for signing
 			});
 			text = JSON.stringify({
 				account: context.config.account,
+				owner: context.owner,
+				mode: context.mode,
 				method: "Posting",
 				transactionCount: transactions.length,
 				transactions: transactions
