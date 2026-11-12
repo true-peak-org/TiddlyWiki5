@@ -30,6 +30,8 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 
 <$button><$action-hiveload/> Load from Hive</$button>
 
+''Load from Hive'' reads the root post and all of its replies and adds their tiddlers to the wiki. The permlink of the root post can be given as the bare permlink, as @author/permlink or as the full url of the post. When an author is given it is loaded instead of the configured account.
+
 ''Status:'' <$list filter="[[$:/state/tiddlywiki/hive/status]get[text]]" variable="ignore"><$text text=<<ignore>>/></$list>
 
 ''Last save:'' <$view tiddler="$:/config/tiddlywiki/hive/remote" field="saved"/>

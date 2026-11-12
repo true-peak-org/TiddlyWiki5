@@ -168,8 +168,8 @@ Return the permlink of the root post of this wiki
 	/*
 Return the url of a post
 */
-	HiveStore.prototype.getUrl = function(config,permlink) {
-		return config.frontEnd + "/@" + config.account + "/" + permlink;
+	HiveStore.prototype.getUrl = function(config,permlink,author) {
+		return config.frontEnd + "/@" + (author || config.account) + "/" + permlink;
 	};
 
 	/*
@@ -880,17 +880,23 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 */
 	HiveStore.prototype.load = function(permlink,callback) {
 		var self = this,
-			config = this.getConfig();
+			config = this.getConfig(),
+			// The permlink may be given as a bare permlink, as
+			// @author/permlink or as a full url of the post. An author
+			// given with the permlink is read instead of the configured
+			// account, so that the wiki of another account can be loaded
+			parsed = util.parsePermlink(permlink),
+			author = (parsed && parsed.author) || config.account;
 		callback = callback || function() {};
-		if(!config.account) {
+		permlink = parsed ? parsed.permlink : (this.getRemoteState() || {}).permlink;
+		if(!author) {
 			return callback("No Hive account name has been configured. Please enter your Hive account name in the control panel.");
 		}
-		permlink = permlink || (this.getRemoteState() || {}).permlink;
 		if(!permlink) {
 			return callback("There is no Hive post to load. Please save the wiki first, or enter the permlink of the root post.");
 		}
 		this.setStatus("Reading the Hive post " + permlink + "...");
-		this.api.getContent(config.account,permlink,function(err,rootContent) {
+		this.api.getContent(author,permlink,function(err,rootContent) {
 			if(err) {
 				self.setStatus("");
 				return callback(err);
@@ -904,7 +910,7 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 				self.setStatus("");
 				return callback("The Hive post " + permlink + " is not a TiddlyWiki5 wiki");
 			}
-			self.getAllReplies(config.account,permlink,function(err,replies) {
+			self.getAllReplies(author,permlink,function(err,replies) {
 				if(err) {
 					self.setStatus("");
 					return callback(err);
@@ -918,11 +924,11 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 					self.setRemoteState({
 						wikiid: metadata.wikiid,
 						permlink: permlink,
-						url: self.getUrl(config,permlink),
+						url: self.getUrl(config,permlink,author),
 						saved: previousState.saved || "",
 						tiddlers: previousState.wikiid === metadata.wikiid ? (previousState.tiddlers || {}) : {}
 					});
-					self.setStatus("Loaded " + summary.added + " tiddler(s) from " + self.getUrl(config,permlink));
+					self.setStatus("Loaded " + summary.added + " tiddler(s) from " + self.getUrl(config,permlink,author));
 					callback(null,summary);
 				});
 			});

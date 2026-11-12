@@ -275,6 +275,36 @@ saves did not, so the presence of the wiki attributes is accepted as well
 	};
 
 	/*
+Parse a reference to a Hive post. The accepted forms are the bare
+permlink, @author/permlink, author/permlink and the full urls of the
+frontends such as https://hive.blog/@author/permlink. Returns an object
+with the permlink and, when an author is given, the author, or null when
+nothing can be parsed
+*/
+	exports.parsePermlink = function(text) {
+		text = String(text === undefined || text === null ? "" : text).trim();
+		if(!text) {
+			return null;
+		}
+		// Strip a full url, if any, keeping the last two path segments
+		var match = /^https?:\/\/[^/]+\/(?:.*\/)?@?([^/@]+)\/([^/?#]+)/.exec(text);
+		if(match) {
+			text = match[1] + "/" + match[2];
+		}
+		// Strip a leading @ of the author, if any
+		text = text.replace(/^@/,"");
+		match = /^([^/]+)\/([^/]+)$/.exec(text);
+		if(match) {
+			return {author: match[1].toLowerCase(),permlink: match[2]};
+		}
+		// A bare permlink
+		if(/^[a-z0-9-]+$/.test(text)) {
+			return {author: null,permlink: text};
+		}
+		return null;
+	};
+
+	/*
 Return the payload of a tiddler as a tiddler object that can be added to
 the wiki
 */
