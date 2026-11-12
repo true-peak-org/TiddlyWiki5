@@ -20,11 +20,11 @@ type: text/vnd.tiddlywiki
 
 The `<<hivelink>>` procedure renders a button that is displayed as a hyperlink. Clicking it loads the Hive post at @@accountId/permlink as a tiddler of this wiki. Call it with the account and the permlink of the post:
 
-<<hivelink harvestmoon299 tw5-my-tiddlywikis-37d8cc783005062a>>
+<<hivelink harvestmoon299 tw5-my-wiki-37d8cc783005062a>>
 
 or with an explicit label:
 
-<<hivelink harvestmoon299 tw5-my-tiddlywikis-37d8cc783005062a "Getting started">>
+<<hivelink harvestmoon299 tw5-my-wiki-37d8cc783005062a "Getting started">>
 
 * accountId: the account the post belongs to
 * permlink: the permlink of the post (or of the root post of the wiki: the replies are loaded with it)

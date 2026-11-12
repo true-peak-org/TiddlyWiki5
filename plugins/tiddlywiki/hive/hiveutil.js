@@ -255,6 +255,26 @@ Return the hash of a payload, used to detect whether a tiddler has changed
 	};
 
 	/*
+Whether the tw5 metadata of a post identifies it as a reply that carries
+the content of a tiddler. The current versions of the plugin write a type
+attribute, earlier saves did not, so the presence of the tiddler payload
+attributes is accepted as well. Proposals and comments always carry their
+type explicitly and are not matched
+*/
+	exports.isTiddlerMetadata = function(tw5) {
+		return Boolean(tw5 && (tw5.type === "tiddler" || (!tw5.type && tw5.title && tw5.parts)));
+	};
+
+	/*
+Whether the tw5 metadata of a post identifies it as the root post of a
+wiki. The current versions of the plugin write a type attribute, earlier
+saves did not, so the presence of the wiki attributes is accepted as well
+*/
+	exports.isRootMetadata = function(tw5) {
+		return Boolean(tw5 && (tw5.type === "root" || (!tw5.type && tw5.wikiid && tw5.index)));
+	};
+
+	/*
 Return the payload of a tiddler as a tiddler object that can be added to
 the wiki
 */

@@ -191,7 +191,7 @@ afterwards.
 	function buildTiddler(author,records,basePermlink,bodyOf) {
 		var first = records[0] || {metadata: {}},
 			tw5 = first.metadata.tw5;
-		if(tw5 && tw5.type === "tiddler") {
+		if(util.isTiddlerMetadata(tw5)) {
 			return buildTw5Tiddler(records,basePermlink);
 		}
 		return buildExternalTiddler(author,authorRecord(first,bodyOf));
@@ -231,7 +231,7 @@ afterwards.
 			var metadata = parseMetadata(content),
 				tw5 = metadata.tw5,
 				settings = splitPartPermlink(content.permlink),
-				isTw5Tiddler = Boolean(tw5 && tw5.type === "tiddler"),
+				isTw5Tiddler = util.isTiddlerMetadata(tw5),
 				parts = isTw5Tiddler ? Math.min(tw5.parts || 1,100) : 1,
 				records = [];
 			if(parts > 1) {

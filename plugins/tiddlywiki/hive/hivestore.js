@@ -239,12 +239,16 @@ Split a payload into parts that fit within the size limits of Hive
 				part: index + 1,
 				parts: parts.length
 			};
+			// The hash is computed before the type attribute is added, so
+			// that replies published by earlier versions of the plugin that
+			// did not write a type have the same hash
 			part.hash = util.getPayloadHash(part);
 			if(JSON.stringify({app: "tw5",tw5: part}).length > MAX_METADATA_LENGTH) {
 			// The fields are too big to be stored in a single reply, drop them
 				part.fields = {};
 				part.hash = util.getPayloadHash(part);
 			}
+			part.type = "tiddler";
 			parts[index] = part;
 		}
 		return parts;
@@ -601,7 +605,7 @@ Build the list of operations that have to be broadcast
 		// The operations for the tiddlers that have been deleted
 		Object.keys(existing).forEach(function(permlink) {
 			var metadata = self.getTw5Metadata(existing[permlink]);
-			if(!metadata || metadata.type !== "tiddler") {
+			if(!util.isTiddlerMetadata(metadata)) {
 				return;
 			}
 			if(index[metadata.title]) {
@@ -627,6 +631,7 @@ Build the list of operations that have to be broadcast
 		});
 		// The operation for the root post
 		var root = {
+			type: "root",
 			wikititle: wikiTitle,
 			wikiid: wikiId,
 			index: []
@@ -855,7 +860,7 @@ shows the implicit attribution of the proposal or the edit
 			}
 			operations.forEach(function(operation) {
 				var metadata = self.getTw5Metadata(operation);
-				if(metadata && metadata.type === "tiddler") {
+				if(util.isTiddlerMetadata(metadata)) {
 					self.wiki.addTiddler(util.payloadToTiddler({
 						title: metadata.title,
 						text: metadata.text,
@@ -895,7 +900,7 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 				return callback("Could not find a Hive post with the permlink " + permlink);
 			}
 			var metadata = self.getTw5Metadata(rootContent);
-			if(!metadata || metadata.type !== "root") {
+			if(!metadata || !util.isRootMetadata(metadata)) {
 				self.setStatus("");
 				return callback("The Hive post " + permlink + " is not a TiddlyWiki5 wiki");
 			}
@@ -944,7 +949,7 @@ Add the tiddlers of the replies to the wiki
 				comments.push({reply: reply,metadata: metadata});
 				return;
 			}
-			if(metadata.type !== "tiddler") {
+			if(metadata.type !== "tiddler" && !util.isTiddlerMetadata(metadata)) {
 				return;
 			}
 			if(!byTitle[metadata.title]) {
