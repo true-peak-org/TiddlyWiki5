@@ -51,6 +51,8 @@ Compute the internal state of the widget
 		this.author = this.getAttribute("author","");
 		this.canonical = this.getAttribute("canonical","no");
 		this.permlink = this.getAttribute("permlink","") || this.wiki.getTiddlerText("$:/config/tiddlywiki/hive/permalink") || "";
+		this.proposal = this.getAttribute("proposal","");
+		this.status = this.getAttribute("status","");
 		this.makeChildWidgets();
 	};
 
@@ -150,8 +152,21 @@ Invoke the action associated with this widget
 			});
 		} else if(this.action === "approve") {
 		// Approve the proposals of the other accounts to the wiki that
-		// has been loaded last: only the owner of the wiki can do this
-			store.approvePending(function(err) {
+		// has been loaded last: only the owner of the wiki can do this.
+		// A proposal attribute approves a single proposal by its permlink
+			if(this.proposal) {
+				store.approveProposal(this.proposal,function(err) {
+					self.report(err);
+				});
+			} else {
+				store.approvePending(function(err) {
+					self.report(err);
+				});
+			}
+		} else if(this.action === "proposal") {
+		// Broadcast the decision of the owner about a proposal: rejected
+		// or merged. The decision is a reply of the proposal on the chain
+			store.setProposalStatus(this.permlink,this.status,function(err) {
 				self.report(err);
 			});
 		} else if(this.action === "load") {
@@ -240,5 +255,6 @@ be sent to Keychain for signing
 	exports["action-hiveinspect"] = HiveActionWidget;
 	exports["action-hivenew"] = HiveActionWidget;
 	exports["action-hiveapprove"] = HiveActionWidget;
+	exports["action-hiveproposal"] = HiveActionWidget;
 
 })();

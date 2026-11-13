@@ -243,8 +243,11 @@ stored in the json_metadata of a Hive reply
 				text: tiddler.fields.text || "",
 				fields: fields,
 				tags: [],
-				created: tiddler.fields.created || "",
-				modified: tiddler.fields.modified || ""
+				// The dates are normalized to the 17-digit datestamps of
+				// TiddlyWiki, because the created and modified fields are
+				// parsed into dates when the tiddlers are read back
+				created: exports.toTiddlerDate(tiddler.fields.created),
+				modified: exports.toTiddlerDate(tiddler.fields.modified)
 			};
 		Object.keys(tiddler.fields).forEach(function(name) {
 			if(EXCLUDED_FIELDS.indexOf(name) === -1) {
@@ -312,6 +315,34 @@ nothing can be parsed
 			return {author: null,permlink: text};
 		}
 		return null;
+	};
+
+	/*
+Return a date of a tiddler as the 17-digit UTC datestamp that TiddlyWiki
+uses to store the created and modified fields. The dates arrive as Date
+objects, as 17-digit datestamps or as the ISO timestamps of the chain
+such as 2026-11-13T02:41:21, which is utc without a timezone suffix.
+A date that cannot be parsed is returned as an empty string, so that the
+field module of the created and modified fields, which parses every value
+into a date, does not show a wrong date
+*/
+	exports.toTiddlerDate = function(value) {
+		if(value instanceof Date) {
+			return $tw.utils.stringifyDate(value);
+		}
+		value = String(value === undefined || value === null ? "" : value);
+		if(!value) {
+			return "";
+		}
+		if(/^[0-9]{17}$/.test(value)) {
+			return value;
+		}
+		// The chain timestamps are utc, without a timezone suffix
+		var parsed = Date.parse(/(?:Z|[+-]\d\d:?\d\d)$/.test(value) ? value : value + "Z");
+		if(isNaN(parsed)) {
+			return "";
+		}
+		return $tw.utils.stringifyDate(new Date(parsed));
 	};
 
 	/*
@@ -495,20 +526,29 @@ Convert the inline markup of a single line of wikitext into markdown
 		result = result.replace(/\{\{\{([\s\S]*?)\}\}\}/g,function(match,content) {
 			return stash("`" + exports.plainText(content) + "`");
 		});
-		// Links - [[label|target]] and [[target]]
+		// Links - [[label|target]] and [[target]]. A target that a link
+		// resolver cannot resolve is only kept as a link when it is a
+		// url on its own, otherwise the link would point out of the wiki
+		// and dead ends are shown as plain text
 		result = result.replace(/\[\[([^\]\|]*)\|([^\]]*)\]\]/g,function(match,label,target) {
 			var url = linkResolver ? linkResolver(target) : null;
 			if(url) {
 				return stash("[" + exports.plainText(label) + "](" + url + ")");
 			}
-			return stash("[" + exports.plainText(label) + "](" + target.replace(/\s+/g,"%20") + ")");
+			if(/^(?:https?:)?\/\//.test(target) || /^\//.test(target)) {
+				return stash("[" + exports.plainText(label) + "](" + target.replace(/\s+/g,"%20") + ")");
+			}
+			return stash(exports.plainText(label));
 		});
 		result = result.replace(/\[\[([^\]]*)\]\]/g,function(match,target) {
 			var url = linkResolver ? linkResolver(target) : null;
 			if(url) {
 				return stash("[" + exports.plainText(target) + "](" + url + ")");
 			}
-			return stash("[" + exports.plainText(target) + "](" + target.replace(/\s+/g,"%20") + ")");
+			if(/^(?:https?:)?\/\//.test(target) || /^\//.test(target)) {
+				return stash("[" + exports.plainText(target) + "](" + target.replace(/\s+/g,"%20") + ")");
+			}
+			return stash(exports.plainText(target));
 		});
 		// Bold and italic
 		result = result.replace(/''(.*?)''/g,"**$1**");

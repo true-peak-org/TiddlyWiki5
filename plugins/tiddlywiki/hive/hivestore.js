@@ -33,7 +33,15 @@ Maximum size of the text of a single part of a tiddler
 	var CONFIG_PREFIX = "$:/config/tiddlywiki/hive/",
 		DEFAULT_PREFIX = "$:/plugins/tiddlywiki/hive/",
 		STATUS_TIDDLER = "$:/state/tiddlywiki/hive/status",
-		REMOTE_TIDDLER = "$:/config/tiddlywiki/hive/remote";
+		REMOTE_TIDDLER = "$:/config/tiddlywiki/hive/remote",
+		// The record of the proposals of the wiki: one entry per proposal
+		// reply with its status. The statuses are kept in this tiddler so
+		// that the curation of the owner survives a reload, and the
+		// decisions are broadcast to the chain as well
+		PROPOSALS_TIDDLER = "$:/config/tiddlywiki/hive/proposals",
+		// The generated listing of the proposals, regenerated whenever the
+		// record changes
+		PROPOSAL_LIST_TIDDLER = "Hive proposals";
 
 	/*
 Construct a store
@@ -485,6 +493,8 @@ once on the chain. The callback is invoked with (err)
 		callback = callback || function() {};
 		this.wiki.deleteTiddler(REMOTE_TIDDLER);
 		this.wiki.deleteTiddler(CONFIG_PREFIX + "permalink");
+		this.wiki.deleteTiddler(PROPOSALS_TIDDLER);
+		this.wiki.deleteTiddler(PROPOSAL_LIST_TIDDLER);
 		this.wiki.addTiddler(new $tw.Tiddler({title: CONFIG_PREFIX + "wiki-id",text: util.generateId()}));
 		this.setStatus("New wiki: the next save publishes a new root post to the account " + (config.account || "(no account configured)"));
 		callback(null,{account: config.account});
@@ -625,11 +635,24 @@ the owner. The callback is invoked with (err,operations,mode)
 					// The reader url of this tiddler: it is shared by all the parts
 					// of the tiddler and carries the tiddler title as the fragment
 					canonicalUrl = self.makeCanonicalUrl(config,rootPermlink,entry.title),
-					metadata = {app: "tw5",canonical_url: canonicalUrl,tw5: part},
+					// The body is rendered before the metadata, so that its
+					// hash can be stored with the metadata: a body that the
+					// current version of the app would render differently,
+					// for example with the links of the tiddlers resolved to
+					// their posts, is broadcast again even when the content
+					// of the tiddler is unchanged
+					body = util.makeTiddlerBody(part,{
+						frontEnd: config.frontEnd,
+						canonicalUrl: canonicalUrl,
+						linkResolver: self.makeLinkResolver(config,entryList,wikiId),
+						tiddler: tiddler
+					});
+				part.bh = util.hashString(body);
+				var metadata = {app: "tw5",canonical_url: canonicalUrl,tw5: part},
 					remoteHash = existingReply ? self.getTw5Metadata(existingReply) : null;
 				index[entry.title] = {permlink: entry.permlink,parts: part.parts,hash: part.hash,part: part};
 				if(remoteHash) {
-					if(remoteHash.hash === part.hash) {
+					if(self.isReplyUpToDate(part,part.bh,remoteHash)) {
 					// Nothing has changed
 						return;
 					}
@@ -678,13 +701,7 @@ the owner. The callback is invoked with (err,operations,mode)
 					});
 					return;
 				}
-				var body = util.makeTiddlerBody(part,{
-						frontEnd: config.frontEnd,
-						canonicalUrl: canonicalUrl,
-						linkResolver: self.makeLinkResolver(config,entryList,wikiId),
-						tiddler: tiddler
-					}),
-					metadataText = JSON.stringify(metadata);
+				var metadataText = JSON.stringify(metadata);
 				operations.push({
 					type: "comment",
 					parent_author: config.account,
@@ -837,6 +854,41 @@ corresponding reply
 	};
 
 	/*
+Return whether the reply on the chain already holds the given part of a
+tiddler and the body that this version of the app renders for it. The
+content is compared by its hash, and because the dates of a tiddler are
+not part of the published content - the reader takes the dates of the
+Hive post - the hash is also compared against the dates that the reply on
+the chain carries. The body is compared by its own hash, so that a body
+that the current version of the app would render differently, for example
+with the tiddler links resolved, is broadcast again even when the content
+of the tiddler is unchanged
+*/
+	HiveStore.prototype.isReplyUpToDate = function(part,bodyHash,remoteMetadata) {
+		if(remoteMetadata.bh !== bodyHash) {
+			return false;
+		}
+		if(remoteMetadata.hash === part.hash) {
+			return true;
+		}
+		var base = {
+				title: part.title,
+				text: part.text,
+				fields: part.fields,
+				tags: part.tags,
+				part: part.part,
+				parts: part.parts
+			},
+			withDates = {};
+		Object.keys(base).forEach(function(key) {
+			withDates[key] = base[key];
+		});
+		withDates.created = remoteMetadata.created || "";
+		withDates.modified = remoteMetadata.modified || "";
+		return remoteMetadata.hash === util.getPayloadHash(withDates);
+	};
+
+	/*
 Wait until the reply interval of the chain has elapsed since the last
 comment of the account, so that the next transaction that creates a
 comment is accepted. The chain rejects a comment when less than
@@ -940,6 +992,12 @@ invoked with (err,result)
 		(existing || []).forEach(function(reply) {
 			existingByPermlink[reply.permlink] = reply;
 		});
+		// The official replies are rendered with the links of the whole
+		// published wiki, so that their bodies match the bodies that a
+		// save of the owner renders and are not broadcast again
+		var publishEntries = this.getPublishTitles(config).map(function(title) {
+			return {title: title,permlink: util.getTiddlerPermlink(wikiId,title)};
+		});
 		(replies || []).forEach(function(reply) {
 			var metadata = self.getTw5Metadata(reply);
 			if(!metadata || (metadata.type !== "proposal" && metadata.type !== "comment")) {
@@ -957,30 +1015,45 @@ invoked with (err,result)
 					text: text,
 					fields: metadata.fields || {},
 					tags: metadata.tags || [],
-					created: metadata.created || "",
-					modified: metadata.modified || ""
+					created: util.toTiddlerDate(metadata.created),
+					modified: util.toTiddlerDate(metadata.modified)
 				});
 			parts.forEach(function(part) {
 				var permlink = part.parts > 1 ? util.getPartPermlink(tiddlerPermlink,part.part) : tiddlerPermlink,
 					existingReply = existingByPermlink[permlink],
-					canonicalUrl = self.makeCanonicalUrl(config,rootPermlink,part.title);
+					canonicalUrl = self.makeCanonicalUrl(config,rootPermlink,part.title),
+					// A tiddler that does not have a reply on the chain yet
+					// is created as the answer of the proposal, so that the
+					// reply shows who proposed it. A reply that exists is
+					// edited in place, and an edit has to keep the parent of
+					// the reply
+					parentAuthor = existingReply ? (existingReply.parent_author || config.account) : reply.author,
+					parentPermlink = existingReply ? (existingReply.parent_permlink || rootPermlink) : reply.permlink,
+					body = util.makeTiddlerBody(part,{
+						frontEnd: config.frontEnd,
+						canonicalUrl: canonicalUrl,
+						linkResolver: self.makeLinkResolver(config,publishEntries,wikiId)
+					});
+				part.bh = util.hashString(body);
+				// The permlink of the proposal is kept in the metadata of
+				// the official reply, so that the proposal is recognized as
+				// accepted when the wiki is loaded
+				part.approved = reply.permlink;
 				if(existingReply) {
 					var remoteMetadata = self.getTw5Metadata(existingReply);
-					if(remoteMetadata && remoteMetadata.hash === part.hash) {
+					if(remoteMetadata && self.isReplyUpToDate(part,part.bh,remoteMetadata)) {
 					// The approved content is broadcast already
 						return;
 					}
 				}
 				operations.push({
 					type: "comment",
-					parent_author: config.account,
-					// The official replies are replies of the root post, like
-					// the replies that a save of the owner broadcasts
-					parent_permlink: rootPermlink,
+					parent_author: parentAuthor,
+					parent_permlink: parentPermlink,
 					author: config.account,
 					permlink: permlink,
 					title: util.makeTitle(part.title + (part.parts > 1 ? " (" + part.part + "/" + part.parts + ")" : "")),
-					body: util.makeTiddlerBody(part,{frontEnd: config.frontEnd,canonicalUrl: canonicalUrl,linkResolver: self.makeLinkResolver(config,[{title: part.title,permlink: tiddlerPermlink}],wikiId)}),
+					body: body,
 					json_metadata: JSON.stringify({app: "tw5",canonical_url: canonicalUrl,tw5: part})
 				});
 			});
@@ -1010,16 +1083,22 @@ invoked with (err,result)
 					text: metadata.text,
 					fields: metadata.fields,
 					tags: metadata.tags,
-					created: metadata.created,
-					modified: metadata.modified
+					created: util.toTiddlerDate(metadata.created),
+					modified: util.toTiddlerDate(metadata.modified)
 				}));
 				var record = state.tiddlers[title];
 				if(!record) {
 					record = state.tiddlers[title] = {permlink: util.getTiddlerPermlink(wikiId,title),hashes: {}};
 				}
 				record.hashes[metadata.part || 1] = metadata.hash;
+				// The proposal that this official reply approves is marked
+				// as accepted in the record of the proposals
+				if(metadata.approved) {
+					self.setProposalRecord(metadata.approved,{status: "accepted",updated: $tw.utils.stringifyDate(new Date())});
+				}
 			});
 			self.setRemoteState(state);
+			self.updateProposalList();
 			self.setStatus("Approved " + operations.length + " reply(ies) as the owner of the wiki");
 			callback(null,{permlink: rootPermlink,operations: operations.length,results: results});
 		});
@@ -1068,6 +1147,9 @@ is invoked with (err,result)
 				self.setStatus("There are no proposals to approve");
 				return callback(null,{operations: 0,pending: 0});
 			}
+			// Sync the record of the proposals, so that the approved
+			// proposals are known in it
+			self.syncProposals(replies);
 			// When several replies propose a change to the same tiddler,
 			// only the latest proposal is approved, because every approval
 			// replaces the content of the tiddler
@@ -1093,6 +1175,251 @@ is invoked with (err,result)
 				result.pending = selected.length;
 				callback(null,result);
 			});
+		});
+	};
+
+	/*
+Approve a single proposal by its permlink: read the replies of the wiki
+that has been loaded last and approve the proposal. The callback is
+invoked with (err,result)
+*/
+	HiveStore.prototype.approveProposal = function(permlink,callback) {
+		var self = this,
+			config = this.getConfig(),
+			remote = this.getRemoteState() || {},
+			author = remote.author || config.account,
+			rootPermlink = remote.permlink;
+		callback = callback || function() {};
+		if(!config.account) {
+			return callback("No Hive account name has been configured. Please enter your Hive account name in the control panel.");
+		}
+		if(remote.author && String(remote.author).toLowerCase() !== String(config.account).toLowerCase()) {
+			return callback("Only the owner @" + remote.author + " of the wiki can approve the proposals");
+		}
+		if(!rootPermlink) {
+			return callback("There is no Hive wiki to approve. Please load a wiki first.");
+		}
+		this.setStatus("Reading the replies of the post " + rootPermlink + "...");
+		this.getAllReplies(author,rootPermlink,function(err,replies) {
+			if(err) {
+				self.setStatus("");
+				return callback(err);
+			}
+			replies = replies || [];
+			var proposal = null;
+			replies.forEach(function(reply) {
+				if(reply.permlink === permlink) {
+					proposal = reply;
+				}
+			});
+			if(!proposal) {
+				self.setStatus("");
+				return callback("Could not find the proposal " + permlink + " in the replies of the wiki. Please load the wiki first.");
+			}
+			// Sync the record of the proposals, so that the approved
+			// proposal is known in it
+			self.syncProposals(replies);
+			self.approve([proposal],replies,function(err,result) {
+				if(err) {
+					self.setStatus("");
+					return callback(err);
+				}
+				if(result.operations === 0) {
+					self.setStatus("The proposal is broadcast already, there is nothing to approve");
+				}
+				callback(null,result);
+			});
+		});
+	};
+
+	/*
+Return the record of the proposals of the wiki, which is kept in a tiddler
+of the wiki so that the curation of the owner survives a reload
+*/
+	HiveStore.prototype.getProposalsRegistry = function() {
+		var text = this.wiki.getTiddlerText(PROPOSALS_TIDDLER),
+			registry = null;
+		if(text) {
+			try {
+				registry = JSON.parse(text);
+			} catch(e) {
+				registry = null;
+			}
+		}
+		if(!registry || !registry.proposals) {
+			registry = {proposals: {}};
+		}
+		return registry;
+	};
+
+	HiveStore.prototype.setProposalsRegistry = function(registry) {
+		this.wiki.addTiddler(new $tw.Tiddler({title: PROPOSALS_TIDDLER,type: "application/json",text: JSON.stringify(registry,null,2)}));
+	};
+
+	/*
+Record a change of the status of a proposal. The statuses are
+outstanding, accepted, merged and rejected
+*/
+	HiveStore.prototype.setProposalRecord = function(permlink,patch) {
+		var registry = this.getProposalsRegistry(),
+			entry = registry.proposals[permlink];
+		if(!entry) {
+			entry = registry.proposals[permlink] = {status: "outstanding",updated: ""};
+		}
+		Object.keys(patch).forEach(function(key) {
+			entry[key] = patch[key];
+		});
+		this.setProposalsRegistry(registry);
+	};
+
+	/*
+Sync the record of the proposals with the replies of the wiki: proposals
+that are not in the record yet are added as outstanding, the statuses that
+are broadcast on the chain as replies of the proposals are applied, and a
+proposal whose approval is kept in the metadata of an official reply is
+marked as accepted. The statuses that the owner decided locally are kept
+when the chain does not hold a decision about the proposal
+*/
+	HiveStore.prototype.syncProposals = function(replies) {
+		var self = this,
+			registry = this.getProposalsRegistry(),
+			chainStatus = {},
+			accepted = {},
+			proposals = {};
+		(replies || []).forEach(function(reply) {
+			var metadata = self.getTw5Metadata(reply);
+			if(!metadata) {
+				return;
+			}
+			if(metadata.type === "proposal") {
+				proposals[reply.permlink] = {
+					title: metadata.title,
+					author: reply.author || "",
+					created: reply.created || "",
+					hash: metadata.hash || ""
+				};
+			} else if(metadata.type === "proposal-status" && metadata.proposal) {
+				var existing = chainStatus[metadata.proposal];
+				if(!existing || String(reply.created || "") >= String(existing.created || "")) {
+					chainStatus[metadata.proposal] = {status: metadata.status,created: reply.created || ""};
+				}
+			} else if(util.isTiddlerMetadata(metadata) && metadata.approved) {
+				accepted[metadata.approved] = true;
+			}
+		});
+		Object.keys(proposals).forEach(function(permlink) {
+			var proposal = proposals[permlink],
+				entry = registry.proposals[permlink];
+			if(!entry) {
+				entry = registry.proposals[permlink] = {status: "outstanding",updated: ""};
+			}
+			entry.title = proposal.title;
+			entry.author = proposal.author;
+			entry.created = proposal.created;
+			entry.hash = proposal.hash;
+			if(chainStatus[permlink] && (chainStatus[permlink].status === "rejected" || chainStatus[permlink].status === "merged")) {
+			// A decision that is broadcast on the chain is authoritative
+				entry.status = chainStatus[permlink].status;
+				entry.updated = chainStatus[permlink].created;
+			} else if(accepted[permlink] && (!entry.status || entry.status === "outstanding")) {
+				entry.status = "accepted";
+				entry.updated = entry.updated || proposal.created;
+			}
+		});
+		this.setProposalsRegistry(registry);
+		this.updateProposalList();
+	};
+
+	/*
+Regenerate the listing of the proposals from the record of the proposals.
+The listing is a tiddler of the wiki that the owner can open, and it is
+transcluded in the control panel. It carries a decision button for every
+outstanding proposal
+*/
+	HiveStore.prototype.updateProposalList = function() {
+		var registry = this.getProposalsRegistry(),
+			remote = this.getRemoteState() || {},
+			permlinks = Object.keys(registry.proposals),
+			lines = [];
+		permlinks.sort(function(a,b) {
+			var entryA = registry.proposals[a],
+				entryB = registry.proposals[b];
+			return String(entryA.title).localeCompare(String(entryB.title)) || String(entryA.created).localeCompare(String(entryB.created));
+		});
+		lines.push("The proposals that other Hive accounts have broadcast as replies to the wiki of @" + (remote.author || "(unknown)") + ". The status of a proposal is kept in the [[" + PROPOSALS_TIDDLER + "]] tiddler, and the decisions of the owner are broadcast to the Hive as replies of the proposals. A proposal that is ''accepted'' is published to the chain by an approval, a proposal that is ''merged'' was incorporated into the wiki by the owner, and a proposal that is ''rejected'' was purposely left out.");
+		lines.push("");
+		if(!permlinks.length) {
+			lines.push("There are no proposals.");
+		} else {
+			lines.push("|!Tiddler |!Proposer |!Proposed |!Status |!Decision |");
+			permlinks.forEach(function(permlink) {
+				var entry = registry.proposals[permlink],
+					created = String(entry.created || "").replace("T"," ").substring(0,16),
+					decision = "";
+				if(entry.status === "outstanding") {
+					decision = "<$button><$action-hiveapprove proposal=\"" + permlink + "\"/>Approve</$button> <$button><$action-hiveproposal permlink=\"" + permlink + "\" status=\"rejected\"/>Reject</$button> <$button><$action-hiveproposal permlink=\"" + permlink + "\" status=\"merged\"/>Merge</$button>";
+				}
+				lines.push("|[[" + entry.title + " (proposal by " + entry.author + ")]] |" + (entry.author || "") + " |" + created + " |" + (entry.status || "outstanding") + " |" + decision + " |");
+			});
+		}
+		this.wiki.addTiddler(new $tw.Tiddler({title: PROPOSAL_LIST_TIDDLER,text: lines.join("\n")}));
+	};
+
+	/*
+Broadcast the decision of the owner about a proposal, which is rejected or
+merged. The decision is broadcast as a reply of the proposal, so that it
+is kept on the chain and is visible to every device that loads the wiki,
+and it is recorded in the record of the proposals. Only the owner of the
+wiki can decide about proposals. The callback is invoked with (err,result)
+*/
+	HiveStore.prototype.setProposalStatus = function(permlink,status,callback) {
+		var self = this,
+			config = this.getConfig(),
+			remote = this.getRemoteState() || {};
+		callback = callback || function() {};
+		if(status !== "rejected" && status !== "merged") {
+			return callback("The status of a proposal has to be rejected or merged");
+		}
+		if(!config.account) {
+			return callback("No Hive account name has been configured. Please enter your Hive account name in the control panel.");
+		}
+		if(remote.author && String(remote.author).toLowerCase() !== String(config.account).toLowerCase()) {
+			return callback("Only the owner @" + remote.author + " of the wiki can decide about the proposals");
+		}
+		if(!this.keychain) {
+			return callback("The Hive Keychain browser extension is not available");
+		}
+		var entry = this.getProposalsRegistry().proposals[permlink];
+		if(!entry) {
+			return callback("The proposal is not in the record of the proposals. Please load the wiki first.");
+		}
+		var operation = {
+			type: "comment",
+			parent_author: entry.author || remote.author || config.account,
+			parent_permlink: permlink,
+			author: config.account,
+			permlink: permlink + "-status",
+			title: util.makeTitle("Status: " + entry.title),
+			body: "> **Note:** The proposal to change the tiddler **" + entry.title + "** was " + status + " by the owner of the wiki (@" + config.account + ").",
+			json_metadata: JSON.stringify({app: "tw5",tw5: {
+				type: "proposal-status",
+				status: status,
+				title: entry.title,
+				proposal: permlink,
+				author: entry.author || "",
+				hash: entry.hash || ""
+			}})
+		};
+		this.setStatus("Broadcasting the decision about the proposal to the tiddler " + entry.title + "...");
+		this.broadcastOperations(config,[operation],function(err,results) {
+			if(err) {
+				self.setStatus("");
+				return callback(err);
+			}
+			self.setProposalRecord(permlink,{status: status,updated: $tw.utils.stringifyDate(new Date())});
+			self.updateProposalList();
+			self.setStatus("The proposal to change the tiddler " + entry.title + " was " + status);
+			callback(null,{operations: 1,results: results,status: status,proposal: permlink});
 		});
 	};
 
@@ -1148,6 +1475,8 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 						self.setStatus("");
 						return callback(err);
 					}
+					// Sync the record of the proposals with the replies
+					self.syncProposals(replies);
 					var previousState = self.getRemoteState() || {};
 					self.setRemoteState({
 						author: author,
@@ -1155,7 +1484,8 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 						permlink: permlink,
 						url: self.getUrl(config,permlink,author),
 						saved: previousState.saved || "",
-						tiddlers: previousState.wikiid === metadata.wikiid ? (previousState.tiddlers || {}) : {}
+						tiddlers: previousState.wikiid === metadata.wikiid ? (previousState.tiddlers || {}) : {},
+						proposals: previousState.proposals || {}
 					});
 					self.setStatus("Loaded " + summary.added + " tiddler(s) from " + self.getUrl(config,permlink,author));
 					callback(null,summary);
@@ -1189,9 +1519,12 @@ Add the tiddlers of the replies to the wiki
 			}
 			// The permlink of the reply and the permlink of its parent are
 			// needed to match the replies of proposals and comments with the
-			// tiddlers that they reply to
+			// tiddlers that they reply to, and the dates of the post are
+			// the dates of the published content
 			metadata.replyPermlink = reply.permlink;
 			metadata.parentPermlink = reply.parent_permlink;
+			metadata.postCreated = reply.created || "";
+			metadata.postModified = reply.last_update || reply.modified || reply.created || "";
 			if(!byTitle[metadata.title]) {
 				byTitle[metadata.title] = [];
 			}
@@ -1219,8 +1552,16 @@ Add the tiddlers of the replies to the wiki
 				text: parts.map(function(part) { return part.text || ""; }).join(""),
 				fields: parts[0].fields || {},
 				tags: parts[0].tags || [],
-				created: parts[0].created || "",
-				modified: parts[0].modified || ""
+				// The dates of the Hive post are the dates of the published
+				// content: the reader takes them instead of the dates that
+				// the tiddler carried in the wiki that published it, which
+				// are often the dates of the demo content of the shell. The
+				// dates are normalized to datestamps, because the created
+				// and modified fields are parsed into dates when a tiddler
+				// is constructed and the ISO timestamps of the chain cannot
+				// be parsed by the field module
+				created: util.toTiddlerDate(parts[0].postCreated || parts[0].created),
+				modified: util.toTiddlerDate(parts[0].postModified || parts[0].modified)
 			};
 			if(existing) {
 				summary.updated++;
@@ -1264,12 +1605,12 @@ Add the tiddlers of the replies to the wiki
 			}
 			transientTags.push(util.COMMENT_TAG);
 			self.wiki.addTiddler(util.payloadToTiddler({
-				title: metadata.title + (metadata.type === "proposal" ? " (proposal)" : ""),
+				title: metadata.title + (metadata.type === "proposal" ? " (proposal by " + (comment.reply.author || "unknown") + ")" : ""),
 				text: metadata.text,
 				fields: metadata.fields,
 				tags: transientTags,
-				created: metadata.created,
-				modified: metadata.modified
+				created: util.toTiddlerDate(metadata.created),
+				modified: util.toTiddlerDate(metadata.modified)
 			}));
 			summary.comments++;
 		});
@@ -1281,5 +1622,7 @@ Add the tiddlers of the replies to the wiki
 	exports.DEFAULT_PREFIX = DEFAULT_PREFIX;
 	exports.STATUS_TIDDLER = STATUS_TIDDLER;
 	exports.REMOTE_TIDDLER = REMOTE_TIDDLER;
+	exports.PROPOSALS_TIDDLER = PROPOSALS_TIDDLER;
+	exports.PROPOSAL_LIST_TIDDLER = PROPOSAL_LIST_TIDDLER;
 
 })();

@@ -28,9 +28,13 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 
 !! Approve
 
-<$button><$action-hiveapprove/> Approve proposals</$button>
+<$button><$action-hiveapprove/> Approve all outstanding</$button>
 
 ''Approve proposals'' publishes the proposals and the comments that other accounts have broadcast as replies to the wiki that has been loaded last, as the official replies that hold the tiddlers. Only the owner of the wiki can approve: the button has to be pressed in a wiki that is configured with the account of the owner. When several accounts have proposed a change to the same tiddler, the latest proposal is approved.
+
+The listing below shows every proposal with its status. ''Outstanding'' proposals have not been decided yet; ''accepted'' proposals are published to the chain by an approval; ''merged'' proposals were incorporated into the wiki by the owner; ''rejected'' proposals were purposely left out. The decisions are broadcast to the Hive as replies of the proposals, so that they are kept on the chain, and they are recorded in the [[$:/config/tiddlywiki/hive/proposals]] tiddler.
+
+{{Hive proposals}}
 
 !! Load
 
