@@ -96,6 +96,37 @@ Tag that marks a tiddler that is a proposed change or a comment
 	exports.COMMENT_TAG = "Proposed";
 
 	/*
+The tag of the transient tiddlers that hold the ordinary replies of the
+Hive, which are not proposals. The replies are grouped by the tiddler or
+the reply that they reply to, and the tag gathers all of them
+*/
+	exports.REPLY_TAG = "Reply";
+
+	/*
+Return the tiddler type of a reply of the Hive. The type header of the
+json metadata of a post names the format of its body, and a reply that
+does not name one is markdown, which is the default format of the Hive
+*/
+	exports.replyType = function(jsonMetadata) {
+		var metadata = jsonMetadata;
+		if(typeof metadata === "string") {
+			try {
+				metadata = JSON.parse(metadata);
+			} catch(e) {
+				metadata = null;
+			}
+		}
+		var type = String((metadata && (metadata.type || metadata.format)) || "markdown").toLowerCase();
+		if(type === "html" || type === "text/html") {
+			return "text/html";
+		}
+		if(type === "text" || type === "text/plain" || type === "plain") {
+			return "text/plain";
+		}
+		return "text/x-markdown";
+	};
+
+	/*
 Fields that are not copied into the payload of a tiddler because they are
 either stored explicitly or are local bookkeeping
 */

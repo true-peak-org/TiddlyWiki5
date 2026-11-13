@@ -56,7 +56,7 @@ tiddlers are never published, and the replies that hold them are not
 loaded, because a broad publish filter must not broadcast them
 */
 	var isManagedTitle = function(title) {
-		return title === PROPOSAL_LIST_TIDDLER || title === LEGACY_PROPOSAL_LIST_TIDDLER || /\(proposal by .*\)$/.test(title);
+		return title === PROPOSAL_LIST_TIDDLER || title === LEGACY_PROPOSAL_LIST_TIDDLER || /\((?:proposal|reply) by .*\)$/.test(title);
 	};
 
 	/*
@@ -281,8 +281,9 @@ Split a payload into parts that fit within the size limits of Hive
 	/*
 Return the list of tiddlers that should be published. The tiddlers that
 the plugin generates - the listing of the proposals and the transient
-tiddlers of the proposals of the other accounts, which carry the tag of
-the proposals - are never published, whatever the publish filter is
+tiddlers of the proposals and of the replies of the other accounts, which
+carry the tag of the proposals or of the replies - are never published,
+whatever the publish filter is
 */
 	HiveStore.prototype.getPublishTitles = function(config) {
 		var self = this;
@@ -290,8 +291,9 @@ the proposals - are never published, whatever the publish filter is
 			if(isManagedTitle(title)) {
 				return false;
 			}
-			var tiddler = self.wiki.getTiddler(title);
-			return !(tiddler && $tw.utils.isArray(tiddler.fields.tags) && tiddler.fields.tags.indexOf(util.COMMENT_TAG) !== -1);
+			var tiddler = self.wiki.getTiddler(title),
+				tags = tiddler && $tw.utils.isArray(tiddler.fields.tags) ? tiddler.fields.tags : [];
+			return tags.indexOf(util.COMMENT_TAG) === -1 && tags.indexOf(util.REPLY_TAG) === -1;
 		});
 	};
 
@@ -1509,6 +1511,9 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 				self.setStatus("");
 				return callback("The Hive post " + permlink + " is not a TiddlyWiki5 wiki");
 			}
+			// The permlink of the root post names the parent of the replies
+			// that reply to the wiki itself
+			metadata.rootPermlink = permlink;
 			self.getAllReplies(author,permlink,function(err,replies) {
 				if(err) {
 					self.setStatus("");
@@ -1545,10 +1550,17 @@ Add the tiddlers of the replies to the wiki
 		var self = this,
 			summary = {added: 0,updated: 0,removed: 0,skipped: 0,comments: 0},
 			byTitle = {},
-			comments = [];
+			comments = [],
+			plainReplies = [];
 		(replies || []).forEach(function(reply) {
 			var metadata = self.getTw5Metadata(reply);
 			if(!metadata) {
+			// A reply without tw5 metadata is an ordinary comment of the
+			// Hive. It is loaded as a transient tiddler that holds the
+			// tiddler or the reply that it replies to as a tag
+				if(reply.body || reply.permlink) {
+					plainReplies.push(reply);
+				}
 				return;
 			}
 			if(metadata.type === "comment" || metadata.type === "proposal") {
@@ -1655,15 +1667,82 @@ Add the tiddlers of the replies to the wiki
 				transientTags.push(repliedTo);
 			}
 			transientTags.push(util.COMMENT_TAG);
+			var commentTitle = metadata.title + (metadata.type === "proposal" ? " (proposal by " + (comment.reply.author || "unknown") + ")" : "");
 			self.wiki.addTiddler(util.payloadToTiddler({
-				title: metadata.title + (metadata.type === "proposal" ? " (proposal by " + (comment.reply.author || "unknown") + ")" : ""),
+				title: commentTitle,
 				text: metadata.text,
 				fields: metadata.fields,
 				tags: transientTags,
 				created: util.toTiddlerDate(metadata.created),
 				modified: util.toTiddlerDate(metadata.modified)
 			}));
+			// The title of the transient tiddler names the reply, so that
+			// the replies that reply to this reply can be tagged with it
+			titlesByPermlink[comment.reply.permlink] = commentTitle;
 			summary.comments++;
+		});
+		// The ordinary replies of the Hive are loaded as transient tiddlers
+		// that hold the tiddler or the reply that they reply to as a tag.
+		// A reply of a reply is tagged with the tiddler of the reply that
+		// it replies to, or with the permlink of it when the reply is not
+		// part of the wiki
+		var replyTitles = {},
+			replyByPermlink = {},
+			usedTitles = {};
+		plainReplies.forEach(function(reply) {
+			replyByPermlink[reply.permlink] = reply;
+		});
+		Object.keys(byTitle).forEach(function(title) {
+			usedTitles[title] = true;
+		});
+		Object.keys(titlesByPermlink).forEach(function(permlink) {
+			usedTitles[titlesByPermlink[permlink]] = true;
+		});
+		var resolveReply = function(reply) {
+			if(replyTitles[reply.permlink]) {
+				return replyTitles[reply.permlink];
+			}
+			var inProgress = resolveReply.inProgress = resolveReply.inProgress || {};
+			if(inProgress[reply.permlink]) {
+			// A reply of itself: the permlink of the reply names the parent
+				return reply.parent_permlink || "";
+			}
+			inProgress[reply.permlink] = true;
+			var parentPermlink = reply.parent_permlink || "",
+				parentTitle;
+			if(rootMetadata.rootPermlink && parentPermlink === rootMetadata.rootPermlink) {
+			// The reply replies to the root post, which is the wiki itself
+				parentTitle = rootMetadata.wikititle || "Home";
+			} else if(titlesByPermlink[parentPermlink]) {
+				parentTitle = titlesByPermlink[parentPermlink];
+			} else if(replyByPermlink[parentPermlink]) {
+				parentTitle = resolveReply(replyByPermlink[parentPermlink]) || parentPermlink;
+			} else {
+				parentTitle = parentPermlink;
+			}
+			var base = parentTitle + " (reply by " + (reply.author || "unknown") + ")",
+				title = usedTitles[base] ? base + " " + util.hashString(reply.permlink).substring(0,8) : base;
+			usedTitles[title] = true;
+			replyTitles[reply.permlink] = title;
+			delete inProgress[reply.permlink];
+			var tags = [];
+			if(parentTitle) {
+				tags.push(parentTitle);
+			}
+			tags.push(util.REPLY_TAG);
+			self.wiki.addTiddler(util.payloadToTiddler({
+				title: title,
+				text: reply.body || "",
+				fields: {type: util.replyType(reply.json_metadata)},
+				tags: tags,
+				created: util.toTiddlerDate(reply.created),
+				modified: util.toTiddlerDate(reply.last_update || reply.modified || reply.created)
+			}));
+			summary.comments++;
+			return title;
+		};
+		plainReplies.forEach(function(reply) {
+			resolveReply(reply);
 		});
 		callback(null,summary);
 	};
