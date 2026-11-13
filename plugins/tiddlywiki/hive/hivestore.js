@@ -40,8 +40,24 @@ Maximum size of the text of a single part of a tiddler
 		// decisions are broadcast to the chain as well
 		PROPOSALS_TIDDLER = "$:/config/tiddlywiki/hive/proposals",
 		// The generated listing of the proposals, regenerated whenever the
-		// record changes
-		PROPOSAL_LIST_TIDDLER = "Hive proposals";
+		// record changes. It is not called "Hive proposals" because a
+		// proposal of the Hive is the name of a draw from the Decentralized
+		// Hive Fund
+		PROPOSAL_LIST_TIDDLER = "Contributions",
+		// The tiddler of the old name of the listing, which is removed
+		// when the listing is regenerated
+		LEGACY_PROPOSAL_LIST_TIDDLER = "Hive proposals";
+
+	/*
+Return whether the title of a tiddler is one that the plugin generates:
+the listing of the proposals or the transient tiddler of a proposal of
+another account, which is titled "Tiddler (proposal by author)". These
+tiddlers are never published, and the replies that hold them are not
+loaded, because a broad publish filter must not broadcast them
+*/
+	var isManagedTitle = function(title) {
+		return title === PROPOSAL_LIST_TIDDLER || title === LEGACY_PROPOSAL_LIST_TIDDLER || /\(proposal by .*\)$/.test(title);
+	};
 
 	/*
 Construct a store
@@ -263,10 +279,20 @@ Split a payload into parts that fit within the size limits of Hive
 	};
 
 	/*
-Return the list of tiddlers that should be published
+Return the list of tiddlers that should be published. The tiddlers that
+the plugin generates - the listing of the proposals and the transient
+tiddlers of the proposals of the other accounts, which carry the tag of
+the proposals - are never published, whatever the publish filter is
 */
 	HiveStore.prototype.getPublishTitles = function(config) {
-		return this.wiki.filterTiddlers(config.publishFilter);
+		var self = this;
+		return this.wiki.filterTiddlers(config.publishFilter).filter(function(title) {
+			if(isManagedTitle(title)) {
+				return false;
+			}
+			var tiddler = self.wiki.getTiddler(title);
+			return !(tiddler && $tw.utils.isArray(tiddler.fields.tags) && tiddler.fields.tags.indexOf(util.COMMENT_TAG) !== -1);
+		});
 	};
 
 	/*
@@ -495,6 +521,7 @@ once on the chain. The callback is invoked with (err)
 		this.wiki.deleteTiddler(CONFIG_PREFIX + "permalink");
 		this.wiki.deleteTiddler(PROPOSALS_TIDDLER);
 		this.wiki.deleteTiddler(PROPOSAL_LIST_TIDDLER);
+		this.wiki.deleteTiddler(LEGACY_PROPOSAL_LIST_TIDDLER);
 		this.wiki.addTiddler(new $tw.Tiddler({title: CONFIG_PREFIX + "wiki-id",text: util.generateId()}));
 		this.setStatus("New wiki: the next save publishes a new root post to the account " + (config.account || "(no account configured)"));
 		callback(null,{account: config.account});
@@ -992,6 +1019,19 @@ invoked with (err,result)
 		(existing || []).forEach(function(reply) {
 			existingByPermlink[reply.permlink] = reply;
 		});
+		// The proposals that are approved are marked as accepted in the
+		// record of the proposals, whether or not a reply was broadcast:
+		// the content of an approved proposal can be on the chain
+		// already, and then the approval only records the decision
+		var markAccepted = function() {
+			(replies || []).forEach(function(reply) {
+				var metadata = self.getTw5Metadata(reply);
+				if(metadata && metadata.type === "proposal") {
+					self.setProposalRecord(reply.permlink,{status: "accepted",updated: $tw.utils.stringifyDate(new Date())});
+				}
+			});
+			self.updateProposalList();
+		};
 		// The official replies are rendered with the links of the whole
 		// published wiki, so that their bodies match the bodies that a
 		// save of the owner renders and are not broadcast again
@@ -1059,6 +1099,9 @@ invoked with (err,result)
 			});
 		});
 		if(!operations.length) {
+		// The approved content is on the chain already: the proposals
+		// are accepted even though nothing was broadcast
+			markAccepted();
 			return callback(null,{permlink: rootPermlink,operations: 0,results: []});
 		}
 		this.broadcastOperations(config,operations,function(err,results) {
@@ -1091,14 +1134,11 @@ invoked with (err,result)
 					record = state.tiddlers[title] = {permlink: util.getTiddlerPermlink(wikiId,title),hashes: {}};
 				}
 				record.hashes[metadata.part || 1] = metadata.hash;
-				// The proposal that this official reply approves is marked
-				// as accepted in the record of the proposals
-				if(metadata.approved) {
-					self.setProposalRecord(metadata.approved,{status: "accepted",updated: $tw.utils.stringifyDate(new Date())});
-				}
 			});
+			// The approved proposals are marked as accepted, also the
+			// ones whose official replies were broadcast already
+			markAccepted();
 			self.setRemoteState(state);
-			self.updateProposalList();
 			self.setStatus("Approved " + operations.length + " reply(ies) as the owner of the wiki");
 			callback(null,{permlink: rootPermlink,operations: operations.length,results: results});
 		});
@@ -1341,6 +1381,10 @@ outstanding proposal
 			remote = this.getRemoteState() || {},
 			permlinks = Object.keys(registry.proposals),
 			lines = [];
+		// The listing was first called "Hive proposals", which is the
+		// name of a draw from the Decentralized Hive Fund: remove the
+		// tiddler of the old name
+		this.wiki.deleteTiddler(LEGACY_PROPOSAL_LIST_TIDDLER);
 		permlinks.sort(function(a,b) {
 			var entryA = registry.proposals[a],
 				entryB = registry.proposals[b];
@@ -1515,6 +1559,13 @@ Add the tiddlers of the replies to the wiki
 				return;
 			}
 			if(metadata.type !== "tiddler" && !util.isTiddlerMetadata(metadata)) {
+				return;
+			}
+			if(isManagedTitle(metadata.title)) {
+			// The listing of the proposals and the transient tiddlers of
+			// the proposals are generated by the plugin: the replies that
+			// a broad publish filter once broadcast for them are ignored
+				summary.skipped++;
 				return;
 			}
 			// The permlink of the reply and the permlink of its parent are

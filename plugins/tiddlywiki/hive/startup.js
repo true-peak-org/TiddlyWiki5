@@ -62,8 +62,18 @@ exports.startup = function() {
 		});
 		// The doc tiddlers of the plugin cannot be deleted because they
 		// live inside the plugin, but the story of the shell opens them.
-		// Open the home of the published wiki instead
-		var open = $tw.wiki.getTiddler("Home") ? ["Home"] : [];
+		// Open the tiddler that the uri fragment of the rooted url
+		// names - the core has opened it from the hash at startup, and
+		// this callback would otherwise replace the story with the home
+		// tiddler. Without a fragment, or when the tiddler of the
+		// fragment was not published, the home tiddler is opened
+		var target = null;
+		if($tw.locationHash && $tw.locationHash.length > 1) {
+			var hash = $tw.locationHash.substr(1),
+				split = hash.indexOf(":");
+			target = $tw.utils.decodeURIComponentSafe((split === -1 ? hash : hash.substr(0,split)).trim());
+		}
+		var open = target && $tw.wiki.getTiddler(target) ? [target] : ($tw.wiki.getTiddler("Home") ? ["Home"] : []);
 		$tw.wiki.addTiddler({title: "$:/DefaultTiddlers",text: $tw.utils.stringifyList(open)});
 		$tw.wiki.addTiddler({title: "$:/StoryList",list: open});
 		// Pin the location of the wiki in the settings, so that a save
