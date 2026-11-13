@@ -148,6 +148,12 @@ Invoke the action associated with this widget
 			store.newWiki(function(err) {
 				self.report(err);
 			});
+		} else if(this.action === "approve") {
+		// Approve the proposals of the other accounts to the wiki that
+		// has been loaded last: only the owner of the wiki can do this
+			store.approvePending(function(err) {
+				self.report(err);
+			});
 		} else if(this.action === "load") {
 			store.load(this.permlink,function(err) {
 				self.report(err);
@@ -232,5 +238,7 @@ be sent to Keychain for signing
 	exports["action-hiveload"] = HiveActionWidget;
 	exports["action-hivelink"] = HiveActionWidget;
 	exports["action-hiveinspect"] = HiveActionWidget;
+	exports["action-hivenew"] = HiveActionWidget;
+	exports["action-hiveapprove"] = HiveActionWidget;
 
 })();
