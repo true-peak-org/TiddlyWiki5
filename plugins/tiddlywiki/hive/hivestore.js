@@ -435,12 +435,29 @@ them
 					// pinned author is kept when the chain has no root post,
 					// for example when the wiki has not been published yet
 					effectiveOwner = chainAuthor || owner;
-				self.buildOperations(config,effectiveOwner,wikiId,wikiTitle,rootPermlink,rootContent,replies,titles,function(err,operations,mode) {
+				// The images whose autoupload is enabled are hosted before
+				// the operations are built, because the bodies of the posts
+				// reference the url of the hosted copy
+				self.uploadPendingImages(config,titles,function(err,uploads) {
 					if(err) {
 						self.setStatus("");
 						return callback(err);
 					}
-					callback(null,operations,{config: config,owner: effectiveOwner,wikiId: wikiId,wikiTitle: wikiTitle,rootPermlink: rootPermlink,titles: titles,mode: mode});
+					// The copies of the images that are stored on the chain
+					// are scaled and re-encoded by the image settings
+					self.prepareImagePayloads(config,titles,function(err,images) {
+						if(err) {
+							self.setStatus("");
+							return callback(err);
+						}
+						self.buildOperations(config,effectiveOwner,wikiId,wikiTitle,rootPermlink,rootContent,replies,titles,function(err,operations,mode) {
+							if(err) {
+								self.setStatus("");
+								return callback(err);
+							}
+							callback(null,operations,{config: config,owner: effectiveOwner,wikiId: wikiId,wikiTitle: wikiTitle,rootPermlink: rootPermlink,titles: titles,mode: mode,images: images,uploads: uploads});
+						});
+					});
 				});
 			});
 		});
@@ -463,50 +480,101 @@ Save the wiki to Hive. The callback is invoked with (err,result)
 				self.setStatus("Nothing to save, the post " + context.rootPermlink + " is up to date");
 				return callback(null,{permlink: context.rootPermlink,operations: 0});
 			}
-			self.broadcastOperations(context.config,operations,function(err,results) {
+			// The resource credits of the account are read before the
+			// transactions are broadcast, so that a save that would cost
+			// more than the account can spend is stopped with a clear
+			// message instead of a chain error
+			self.getRcStatus(context.config,function(err,rc) {
+				var rcBefore = err ? null : rc;
 				if(err) {
-					self.setStatus("");
-					return callback(err);
+					self.api.log("Cannot read the resource credits: " + err);
 				}
-				if(context.mode === "propose") {
-				// The changes were broadcast as proposals for the owner of
-				// the wiki. Record them, so that a save that is retried
-				// before the chain has indexed the proposals does not
-				// propose the same content again. The state of the wiki
-				// itself is not changed: the wiki still belongs to its owner
-					var state = self.getRemoteState() || {};
-					state.proposals = state.proposals || {};
-					operations.forEach(function(operation) {
-						var metadata = self.getTw5Metadata(operation);
-						if(metadata && metadata.hash) {
-							state.proposals[metadata.hash] = metadata.title;
-						}
-					});
-					self.setRemoteState(state);
-					var proposeText = "Proposed " + operations.length + " change(s) to the wiki of @" + context.owner + ". The owner can approve the proposals and publish them.";
-					var proposeOverLimit = self.getOverLimitTiddlers() || [];
-					if(proposeOverLimit.length) {
-						proposeText += " The following tiddler(s) exceeded the limits of a Hive post and were truncated: " + proposeOverLimit.join(", ");
+				self.broadcastOperations(context.config,operations,rcBefore,function(err,results) {
+					if(err) {
+						self.setStatus("");
+						return callback(err);
 					}
-					self.setStatus(proposeText);
-					return callback(null,{permlink: context.rootPermlink,operations: operations.length,results: results,proposed: true,warnings: proposeOverLimit});
-				}
-				var state = self.getRemoteState() || {};
-				state.wikiid = context.wikiId;
-				state.permlink = context.rootPermlink;
-				state.url = self.getUrl(context.config,context.rootPermlink);
-				state.saved = $tw.utils.stringifyDate(new Date());
-				state.tiddlers = self.getPublishedTiddlers(context.wikiId,context.titles);
-				self.setRemoteState(state);
-				var statusText = "Saved " + operations.length + " operation(s) to " + self.getUrl(context.config,context.rootPermlink);
-				var overLimit = self.getOverLimitTiddlers() || [];
-				if(overLimit.length) {
+					if(context.mode === "propose") {
+						// The changes were broadcast as proposals for the owner of
+						// the wiki. Record them, so that a save that is retried
+						// before the chain has indexed the proposals does not
+						// propose the same content again. The state of the wiki
+						// itself is not changed: the wiki still belongs to its owner
+						var state = self.getRemoteState() || {};
+						state.proposals = state.proposals || {};
+						operations.forEach(function(operation) {
+							var metadata = self.getTw5Metadata(operation);
+							if(metadata && metadata.hash) {
+								state.proposals[metadata.hash] = metadata.title;
+							}
+						});
+						self.setRemoteState(state);
+						var proposeText = "Proposed " + operations.length + " change(s) to the wiki of @" + context.owner + ". The owner can approve the proposals and publish them.";
+						var proposeOverLimit = self.getOverLimitTiddlers() || [];
+						if(proposeOverLimit.length) {
+							proposeText += " The following tiddler(s) exceeded the limits of a Hive post and were truncated: " + proposeOverLimit.join(", ");
+						}
+						if(context.uploads && context.uploads.length) {
+							proposeText += " The hosted copies of these image(s) were uploaded: " + context.uploads.join(", ");
+						}
+						self.setStatus(proposeText);
+						return callback(null,{permlink: context.rootPermlink,operations: operations.length,results: results,proposed: true,warnings: proposeOverLimit,uploads: context.uploads});
+					}
+					var state = self.getRemoteState() || {};
+					state.wikiid = context.wikiId;
+					state.permlink = context.rootPermlink;
+					state.url = self.getUrl(context.config,context.rootPermlink);
+					state.saved = $tw.utils.stringifyDate(new Date());
+					state.tiddlers = self.getPublishedTiddlers(context.wikiId,context.titles);
+					self.setRemoteState(state);
+					var statusText = "Saved " + operations.length + " operation(s) to " + self.getUrl(context.config,context.rootPermlink);
+					var overLimit = self.getOverLimitTiddlers() || [];
+					if(overLimit.length) {
 					// Warn about the tiddlers that would exceed the limits of a Hive post
-					statusText += " The following tiddler(s) exceeded the limits of a Hive post and were truncated: " + overLimit.join(", ");
-				}
-				self.setStatus(statusText);
-				callback(null,{permlink: context.rootPermlink,operations: operations.length,results: results,warnings: overLimit});
+						statusText += " The following tiddler(s) exceeded the limits of a Hive post and were truncated: " + overLimit.join(", ");
+					}
+					if(context.uploads && context.uploads.length) {
+						statusText += " The hosted copies of these image(s) were uploaded: " + context.uploads.join(", ");
+					}
+					self.setStatus(statusText);
+					callback(null,{permlink: context.rootPermlink,operations: operations.length,results: results,warnings: overLimit,uploads: context.uploads});
+					// The cost of the save is measured in mana per byte, so that
+					// the next save can stop before it exceeds the credits
+					self.measureRcCost(context.config,operations,rcBefore);
+				});
 			});
+		});
+	};
+
+	/*
+Measure the cost of a finished save in mana per byte, so that the next
+save can estimate what it costs and stop before the account runs out of
+resource credits. The callback style api is not needed, the measurement is
+stored with the remote state in the background
+*/
+	HiveStore.prototype.measureRcCost = function(config,operations,rcBefore) {
+		var self = this;
+		if(!rcBefore || !rcBefore.current) {
+			return;
+		}
+		var bytes = 0;
+		operations.forEach(function(operation) {
+			bytes += util.getOperationSize(operation);
+		});
+		if(!bytes) {
+			return;
+		}
+		this.getRcStatus(config,function(err,rc) {
+			if(err || !rc || rc.current > rcBefore.current) {
+				return;
+			}
+			var perByte = (rcBefore.current - rc.current) / bytes;
+			if(perByte > 0) {
+				var state = self.getRemoteState() || {};
+				state.rcPerByte = perByte;
+				state.rcMeasured = $tw.utils.stringifyDate(new Date());
+				self.setRemoteState(state);
+			}
 		});
 	};
 
@@ -542,7 +610,7 @@ the first save have been indexed
 			if(!tiddler) {
 				return;
 			}
-			var payload = util.getTiddlerPayload(tiddler),
+			var payload = self.getImagePayload(tiddler),
 				parts = self.splitPayload(payload),
 				hashes = {};
 			parts.forEach(function(part) {
@@ -554,6 +622,239 @@ the first save have been indexed
 			};
 		});
 		return published;
+	};
+
+	/*
+Return the payload of a tiddler. The payload of an image is the copy that
+is stored on the chain, which can be scaled down and re-encoded by the
+image settings of the tiddler, while the tiddler itself keeps the original
+*/
+	HiveStore.prototype.getImagePayload = function(tiddler) {
+		var cached = this._imagePayloads && this._imagePayloads[tiddler.fields.title];
+		return cached || util.getTiddlerPayload(tiddler);
+	};
+
+	/*
+Return the default image settings of the wiki, from the config tiddlers
+*/
+	HiveStore.prototype.getImageDefaults = function() {
+		return {
+			"hive-image-cdn-scale": this.getConfigText("image/cdn-scale",""),
+			"hive-image-cdn-quality": this.getConfigText("image/cdn-quality",""),
+			"hive-image-chain-scale": this.getConfigText("image/chain-scale",""),
+			"hive-image-chain-quality": this.getConfigText("image/chain-quality",""),
+			"hive-image-chain-external": this.getConfigText("image/chain-external",""),
+			"hive-image-autoupload": this.getConfigText("image/autoupload","")
+		};
+	};
+
+	/*
+Prepare the payloads of the images of a save. The copy of an image that is
+stored on the chain is scaled down and re-encoded by the image settings of
+the tiddler, or left out entirely when the image is only hosted on the
+image hoster of the Hive. The tiddler itself keeps the original image: the
+hash of the transformed copy is kept in the field hive-image-chain-hash,
+so that a tiddler that was loaded from the chain and already holds the
+transformed copy is not transformed again. The callback is invoked with
+(err,images) where the images hold the prepared settings of each image
+*/
+	HiveStore.prototype.prepareImagePayloads = function(config,titles,callback) {
+		var self = this,
+			defaults = this.getImageDefaults(),
+			images = [],
+			pending = [];
+		this._imagePayloads = {};
+		titles.forEach(function(title) {
+			var tiddler = self.wiki.getTiddler(title);
+			if(!tiddler || !util.isImageTiddler(tiddler)) {
+				return;
+			}
+			var settings = util.getImageSettings(tiddler,defaults);
+			images.push({title: title,tiddler: tiddler,settings: settings});
+			if(settings.external) {
+			// No copy of the image is stored on the chain: the payload
+			// holds the url of the hosted copy only, and the readers of
+			// the wiki load the image from the hoster
+				var payload = util.getTiddlerPayload(tiddler);
+				payload.text = "";
+				self._imagePayloads[title] = payload;
+			} else if(settings.chain.scale < 1 && settings.chain.scale > 0 || settings.chain.quality < 1) {
+				pending.push({title: title,tiddler: tiddler,settings: settings});
+			}
+		});
+		var index = 0;
+		function next() {
+			if(index >= pending.length) {
+				return callback(null,images);
+			}
+			var item = pending[index++],
+				tiddler = item.tiddler,
+				text = String(tiddler.fields.text || "");
+			if(!text) {
+			// An image without data cannot be transformed
+				return next();
+			}
+			if(tiddler.fields[util.IMAGE_CHAIN_HASH_FIELD] === util.hashString(text)) {
+			// The tiddler already holds the copy that is stored on the
+			// chain, for example because it was loaded from the chain
+				return next();
+			}
+			util.transformImage(text,tiddler.fields.type,{scale: item.settings.chain.scale,quality: item.settings.chain.quality},function(err,transformed) {
+				if(err) {
+					return callback("Cannot prepare the image " + item.title + " for the Hive: " + err);
+				}
+				if(transformed.changed) {
+					var payload = util.getTiddlerPayload(tiddler),
+						fields = $tw.utils.extend({},payload.fields);
+					fields[util.IMAGE_SRC_HASH_FIELD] = util.hashString(text);
+					fields[util.IMAGE_CHAIN_HASH_FIELD] = util.hashString(transformed.text);
+					fields.type = transformed.type;
+					payload.text = transformed.text;
+					payload.fields = fields;
+					self._imagePayloads[item.title] = payload;
+				}
+				next();
+			});
+		}
+		next();
+	};
+
+	/*
+Upload the copy of an image to the image hoster of the Hive. The upload
+is signed with the posting key of the configured account: the signature
+covers the challenge and the bytes of the image, and the Hive Keychain
+asks the user for the permission to sign. The url of the uploaded image is
+stored in the tiddler, and a second upload of an unchanged image is
+skipped. The callback is invoked with (err,result)
+*/
+	HiveStore.prototype.uploadImage = function(config,title,callback) {
+		var self = this,
+			tiddler = this.wiki.getTiddler(title);
+		if(!tiddler) {
+			return callback("There is no tiddler " + title);
+		}
+		if(!util.isImageTiddler(tiddler)) {
+			return callback("The tiddler " + title + " is not an image");
+		}
+		if(!String(tiddler.fields.text || "")) {
+		// An image without data, for example a tiddler that was loaded
+		// from the chain and holds the hosted copy only
+			return callback("The image tiddler " + title + " holds no image data to upload");
+		}
+		if(!this.keychain) {
+			return callback("The Hive Keychain browser extension is not available");
+		}
+		var settings = util.getImageSettings(tiddler,this.getImageDefaults());
+		this.setStatus("Preparing the hosted copy of the image " + title + " ...");
+		var host = String(this.getConfigText("image-host","https://images.hive.blog") || "https://images.hive.blog").trim().replace(/\/$/,"");
+		var original = {text: String(tiddler.fields.text || ""),type: tiddler.fields.type};
+		util.transformImage(original.text,original.type,{scale: settings.cdn.scale,quality: settings.cdn.quality},function(err,transformed) {
+			var text = original.text,
+				type = original.type;
+			if(err) {
+			// An image that the browser cannot decode is uploaded as it is,
+			// the hoster scales the images down itself
+				self.setStatus("The image " + title + " cannot be scaled in the browser (" + err + "), it is uploaded as it is");
+			} else {
+				text = transformed.text;
+				type = transformed.type || original.type;
+			}
+			var bytes = util.decodeBase64(text),
+				cdnHash = util.hashString(text),
+				typeInfo = $tw.config.contentTypeInfo[type] || {},
+				extension = typeInfo.extension || "",
+				filename = title.replace(/[^\w\-.]+/g,"-") + extension;
+			if(tiddler.fields[util.IMAGE_CDN_HASH_FIELD] === cdnHash && tiddler.fields[util.IMAGE_URL_FIELD]) {
+			// The same image is hosted already
+				return callback(null,{url: tiddler.fields[util.IMAGE_URL_FIELD],unchanged: true});
+			}
+			util.imageChallengeHash(bytes,function(err,hash) {
+				if(err) {
+					return callback(err);
+				}
+				// The signature covers the challenge and the bytes, and the
+				// Hive Keychain signs the bytes of a serialized node buffer
+				var prefix = new TextEncoder().encode(util.IMAGEHOSTER_CHALLENGE),
+					challenge = new Uint8Array(prefix.length + bytes.length);
+				challenge.set(prefix);
+				challenge.set(bytes,prefix.length);
+				self.setStatus("Waiting for the signature of the upload of " + title + " in the Hive Keychain ...");
+				self.keychain.signBuffer(config.account,util.bufferJsonMessage(challenge),"Posting",function(err,signature) {
+					if(err) {
+						return callback(err);
+					}
+					if(typeof signature !== "string") {
+						signature = signature && (signature.signature || signature.result);
+					}
+					if(!signature) {
+						return callback("The Hive Keychain did not return a signature for the upload of " + title);
+					}
+					self.setStatus("Uploading " + title + " (" + Math.round(bytes.length / 1024) + " kB) to " + host + " ...");
+					var form = new FormData();
+					form.append("file",new File([bytes],filename,{type: type}));
+					fetch(host + "/" + config.account + "/" + signature,{method: "POST",body: form}).then(function(response) {
+						return response.json().catch(function() {
+							throw new Error("The image hoster answered with the status " + response.status);
+						});
+					}).then(function(result) {
+						if(result && result.error) {
+							throw new Error("The image hoster rejected the upload: " + (result.error.name || JSON.stringify(result.error)));
+						}
+						if(!result || !result.url) {
+							throw new Error("The image hoster did not return the url of the image");
+						}
+						self.wiki.addTiddler(new $tw.Tiddler(tiddler,{
+							title: title,
+							"hive-image-url": result.url,
+							"hive-image-cdn-hash": cdnHash
+						}));
+						self.setStatus("The image " + title + " is hosted at " + result.url);
+						callback(null,{url: result.url,unchanged: false});
+					}).catch(function(err) {
+						callback("Cannot upload " + title + " to " + host + ": " + err.message);
+					});
+				});
+			});
+		});
+	};
+
+	/*
+Upload the images of a save whose autoupload setting is enabled and whose
+hosted copy is not up to date. The uploads are done one after the other,
+each of them asks the Hive Keychain for a signature. The callback is
+invoked with (err,uploads)
+*/
+	HiveStore.prototype.uploadPendingImages = function(config,titles,callback) {
+		var self = this,
+			defaults = this.getImageDefaults(),
+			pending = [];
+		titles.forEach(function(title) {
+			var tiddler = self.wiki.getTiddler(title);
+			if(tiddler && util.isImageTiddler(tiddler)) {
+				var settings = util.getImageSettings(tiddler,defaults);
+				if(settings.autoupload) {
+					pending.push(title);
+				}
+			}
+		});
+		var index = 0,
+			uploads = [];
+		function next() {
+			if(index >= pending.length) {
+				return callback(null,uploads);
+			}
+			var title = pending[index++];
+			self.uploadImage(config,title,function(err,result) {
+				if(err) {
+					return callback(err);
+				}
+				if(!result.unchanged) {
+					uploads.push(title);
+				}
+				next();
+			});
+		}
+		next();
 	};
 
 	/*
@@ -634,7 +935,7 @@ the owner. The callback is invoked with (err,operations,mode)
 			if(!tiddler) {
 				return;
 			}
-			var payload = util.getTiddlerPayload(tiddler),
+			var payload = self.getImagePayload(tiddler),
 				permlink = util.getTiddlerPermlink(wikiId,title),
 				parts = self.splitPayload(payload),
 				entry = {title: title,payload: payload,permlink: permlink,parts: parts.length};
@@ -644,7 +945,7 @@ the owner. The callback is invoked with (err,operations,mode)
 		// The operations for the tiddlers themselves
 		entryList.forEach(function(entry) {
 			var tiddler = self.wiki.getTiddler(entry.title),
-				payload = util.getTiddlerPayload(tiddler),
+				payload = self.getImagePayload(tiddler),
 				parts = self.splitPayload(payload);
 			if(JSON.stringify({app: "tw5",tw5: payload}).length > MAX_METADATA_LENGTH) {
 				// The metadata of this tiddler would exceed the limit of a Hive post
@@ -674,6 +975,7 @@ the owner. The callback is invoked with (err,operations,mode)
 						frontEnd: config.frontEnd,
 						canonicalUrl: canonicalUrl,
 						linkResolver: self.makeLinkResolver(config,entryList,wikiId),
+						imageResolver: self.makeImageResolver(entryList),
 						tiddler: tiddler
 					});
 				part.bh = util.hashString(body);
@@ -883,6 +1185,24 @@ corresponding reply
 	};
 
 	/*
+Return a resolver that names the url of the hosted copy of an image. The
+images that are not hosted resolve to null, so that their embeds stay as
+they are
+*/
+	HiveStore.prototype.makeImageResolver = function(entries) {
+		var map = {};
+		entries.forEach(function(entry) {
+			var tiddler = this.wiki.getTiddler(entry.title);
+			if(tiddler && tiddler.fields[util.IMAGE_URL_FIELD]) {
+				map[entry.title] = tiddler.fields[util.IMAGE_URL_FIELD];
+			}
+		},this);
+		return function(target) {
+			return map[target] || null;
+		};
+	};
+
+	/*
 Return whether the reply on the chain already holds the given part of a
 tiddler and the body that this version of the app renders for it. The
 content is compared by its hash, and because the dates of a tiddler are
@@ -955,10 +1275,23 @@ assert, so the operations cannot be packed together. Before each
 transaction the last comment of the account is checked, so that a save
 retried shortly after a failed one does not collide with it
 */
-	HiveStore.prototype.broadcastOperations = function(config,operations,callback) {
-		var self = this,
-			index = 0,
-			results = [];
+	HiveStore.prototype.broadcastOperations = function(config,operations,rc,callback) {
+		var self = this;
+		// The resource credits are optional: a caller of an older version
+		// passes the callback in the third argument
+		if(arguments.length === 3) {
+			callback = rc;
+			rc = null;
+		}
+		var index = 0,
+			results = [],
+			// The cost of a broadcast is estimated from the cost of the
+			// previous save in mana per byte, and the readings of the
+			// resource credits of this save measure the cost of this one
+			state = this.getRemoteState() || {},
+			rcPerByte = state.rcPerByte || null,
+			rcAvailable = rc ? rc.current : null,
+			rcSpent = 0;
 		function next() {
 			if(index >= operations.length) {
 				return callback(null,results);
@@ -968,6 +1301,13 @@ retried shortly after a failed one does not collide with it
 			if(size > util.MAX_TRANSACTION_LENGTH) {
 				return callback("The operation " + operation.permlink + " is " + size + " characters long and does not fit into a Hive transaction");
 			}
+			if(rcPerByte && rcAvailable !== null) {
+				var projected = rcPerByte * (rcSpent + size),
+					projectedTotal = rcPerByte * operations.reduce(function(sum,op) { return sum + util.getOperationSize(op); },0);
+				if(projected > rcAvailable * 0.95) {
+					return callback("Not enough Hive Power (resource credits): " + index + " transaction(s) of this save are broadcast already, but broadcasting all " + operations.length + " is projected to cost about " + Math.round(100 * projectedTotal / rcAvailable) + "% of the credits that are available now, and only " + Math.round(100 * rcAvailable / rc.max) + "% of them are left. The save was stopped before the chain could reject it for lack of Hive Power. The parts that are broadcast already are kept on the chain and are not broadcast again: reduce the sizes, for example scale the copies of the images down in the image manager, or wait for the credits to regenerate, and save again.");
+				}
+			}
 			self.waitReplyInterval(config,function() {
 				index++;
 				self.setStatus("Broadcasting transaction " + index + " of " + operations.length + "...");
@@ -976,6 +1316,7 @@ retried shortly after a failed one does not collide with it
 						return callback(err);
 					}
 					results.push(result);
+					rcSpent += size;
 					// Wait for the reply interval of the chain before the
 					// next transaction, and finish immediately after the
 					// last one
@@ -1412,6 +1753,32 @@ outstanding proposal
 	};
 
 	/*
+Return the resource credits of the configured account. The callback is
+invoked with (err,credits) where the credits hold the current mana, the
+maximum mana and the share of the mana that is available
+*/
+	HiveStore.prototype.getRcStatus = function(config,callback) {
+		config = config || this.getConfig();
+		if(!config.account) {
+			return callback("No Hive account name has been configured");
+		}
+		if(!this.api) {
+			return callback("The Hive api is not available");
+		}
+		this.api.getRcAccounts([config.account],function(err,credits) {
+			if(err) {
+				return callback(err);
+			}
+			var credit = credits[config.account];
+			if(!credit) {
+				return callback("The Hive does not report the resource credits of the account " + config.account);
+			}
+			credit.percent = credit.max > 0 ? Math.round(100 * credit.current / credit.max) : 0;
+			callback(null,credit);
+		});
+	};
+
+	/*
 Broadcast the decision of the owner about a proposal, which is rejected or
 merged. The decision is broadcast as a reply of the proposal, so that it
 is kept on the chain and is visible to every device that loads the wiki,
@@ -1610,10 +1977,18 @@ Add the tiddlers of the replies to the wiki
 				summary.skipped++;
 				return;
 			}
+			var text = parts.map(function(part) { return part.text || ""; }).join(""),
+				fields = parts[0].fields || {};
+			if(!text && fields[util.IMAGE_URL_FIELD] && util.isImageTiddler({fields: {type: fields.type}})) {
+			// An image that is not stored on the chain is loaded from the
+			// image hoster of the Hive
+				fields = $tw.utils.extend({},fields);
+				fields._canonical_uri = fields[util.IMAGE_URL_FIELD];
+			}
 			var payload = {
 				title: title,
-				text: parts.map(function(part) { return part.text || ""; }).join(""),
-				fields: parts[0].fields || {},
+				text: text,
+				fields: fields,
 				tags: parts[0].tags || [],
 				// The dates of the Hive post are the dates of the published
 				// content: the reader takes them instead of the dates that
@@ -1754,5 +2129,7 @@ Add the tiddlers of the replies to the wiki
 	exports.REMOTE_TIDDLER = REMOTE_TIDDLER;
 	exports.PROPOSALS_TIDDLER = PROPOSALS_TIDDLER;
 	exports.PROPOSAL_LIST_TIDDLER = PROPOSAL_LIST_TIDDLER;
+	exports.MAX_TEXT_LENGTH = MAX_TEXT_LENGTH;
+	exports.MAX_METADATA_LENGTH = MAX_METADATA_LENGTH;
 
 })();

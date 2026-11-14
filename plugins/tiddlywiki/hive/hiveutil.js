@@ -475,7 +475,7 @@ Convert a wikitext tiddler into markdown. The optional linkResolver
 callback is passed the target of a link and should return the URL to use
 or null to leave the link alone
 */
-	exports.wikitextToMarkdown = function(text,linkResolver) {
+	exports.wikitextToMarkdown = function(text,linkResolver,imageResolver) {
 		var lines = String(text === undefined || text === null ? "" : text).split("\n"),
 			output = [],
 			index = 0,
@@ -502,7 +502,7 @@ or null to leave the link alone
 			// Headings
 			var headingMatch = /^(!{1,6})\s*(.*)$/.exec(line);
 			if(headingMatch) {
-				output.push(new Array(headingMatch[1].length + 1).join("#") + " " + exports.inlineToMarkdown(headingMatch[2],linkResolver));
+				output.push(new Array(headingMatch[1].length + 1).join("#") + " " + exports.inlineToMarkdown(headingMatch[2],linkResolver,imageResolver));
 				index++;
 				continue;
 			}
@@ -515,7 +515,7 @@ or null to leave the link alone
 			// Block quotes
 			var quoteMatch = /^"""\s*(.*)$/.exec(line);
 			if(quoteMatch) {
-				output.push("> " + exports.inlineToMarkdown(quoteMatch[1],linkResolver));
+				output.push("> " + exports.inlineToMarkdown(quoteMatch[1],linkResolver,imageResolver));
 				index++;
 				continue;
 			}
@@ -528,12 +528,12 @@ or null to leave the link alone
 				for(var l = 1; l < level; l++) {
 					indent += "  ";
 				}
-				output.push(indent + marker + " " + exports.inlineToMarkdown(listMatch[3],linkResolver));
+				output.push(indent + marker + " " + exports.inlineToMarkdown(listMatch[3],linkResolver,imageResolver));
 				index++;
 				continue;
 			}
 			// Everything else
-			output.push(exports.inlineToMarkdown(line,linkResolver));
+			output.push(exports.inlineToMarkdown(line,linkResolver,imageResolver));
 			index++;
 		}
 		return output.join("\n");
@@ -542,7 +542,7 @@ or null to leave the link alone
 	/*
 Convert the inline markup of a single line of wikitext into markdown
 */
-	exports.inlineToMarkdown = function(text,linkResolver) {
+	exports.inlineToMarkdown = function(text,linkResolver,imageResolver) {
 		var result = String(text === undefined || text === null ? "" : text),
 			placeholders = [];
 		/*
@@ -556,6 +556,34 @@ Convert the inline markup of a single line of wikitext into markdown
 		// Inline code (triple braces in TW5) - don't convert to markdown code in a way that breaks things
 		result = result.replace(/\{\{\{([\s\S]*?)\}\}\}/g,function(match,content) {
 			return stash("`" + exports.plainText(content) + "`");
+		});
+		// Images - [img[imagetiddler]] and [img[alt|imagetiddler]]. An
+		// image that the image resolver resolves to a url is published as
+		// a markdown image, so that the post shows the image
+		result = result.replace(/\[img(?:\[[^\[\]]*\])?\[([^\]]*)\]\]/g,function(match,content) {
+			var alt = "",
+				target = content,
+				separator = content.indexOf("|");
+			if(separator !== -1) {
+				alt = content.substring(0,separator);
+				target = content.substring(separator + 1);
+			}
+			var url = imageResolver ? imageResolver(target) : null;
+			if(url) {
+				return stash("![" + exports.plainText(alt) + "](" + url + ")");
+			}
+			if(/^(?:https?:)?\/\//.test(target)) {
+				return stash("![" + exports.plainText(alt) + "](" + target.replace(/\s+/g,"%20") + ")");
+			}
+			return stash(exports.plainText(alt) || target);
+		});
+		// Transcluded image tiddlers - {{imagetiddler}}
+		result = result.replace(/\{\{([^{}\s][^{}]*)\}\}/g,function(match,target) {
+			var url = imageResolver ? imageResolver(target) : null;
+			if(url) {
+				return stash("![" + exports.plainText(target) + "](" + url + ")");
+			}
+			return stash(match);
 		});
 		// Links - [[label|target]] and [[target]]. A target that a link
 		// resolver cannot resolve is only kept as a link when it is a
@@ -645,7 +673,12 @@ json_metadata of the post
 			// TiddlyWiki originated content is converted into markdown, hive
 			// originated content such as comments and proposals is usually
 			// authored in markdown already
-			markdown = exports.isMarkdown(payload.text) ? String(payload.text || "") : exports.wikitextToMarkdown(payload.text,options.linkResolver);
+			markdown = exports.isMarkdown(payload.text) ? String(payload.text || "") : exports.wikitextToMarkdown(payload.text,options.linkResolver,options.imageResolver);
+		} else if(options.tiddler && options.tiddler.fields[exports.IMAGE_URL_FIELD]) {
+			// The body of an image that is hosted on the image hoster of
+			// the Hive shows the hosted image, so that the post is readable
+			// on the front-ends of the Hive
+			markdown = "![" + exports.plainText(payload.title) + "](" + options.tiddler.fields[exports.IMAGE_URL_FIELD] + ")";
 		}
 		markdown = exports.expandHiveLinks(markdown,options.frontEnd);
 		lines.push("> **Note:** This post is part of a wiki published from [TiddlyWiki5](https://tiddlywiki.com).");
@@ -727,6 +760,207 @@ Return the tiddler title of a post, truncated to the maximum length
 			return title;
 		}
 		return title.substring(0,exports.MAX_TITLE_LENGTH - 11) + "..." + exports.hashString(title).substring(0,8);
+	};
+
+	/*
+Image handling. An image of the wiki is published twice: the chain carries
+a copy as base64 in the metadata of the replies of the wiki, and the image
+hoster of the Hive carries a copy that the markdown bodies of the posts
+reference, so that the images are visible on the front-ends of the Hive.
+Both copies can be scaled down and re-encoded, because a full size image
+costs several replies on the chain and is slow to load from the hoster.
+The settings of the two copies are fields of the tiddler, the copy that is
+stored on the chain is the copy that a reader of the wiki receives
+*/
+	exports.IMAGE_URL_FIELD = "hive-image-url";
+	exports.IMAGE_CDN_HASH_FIELD = "hive-image-cdn-hash";
+	exports.IMAGE_SRC_HASH_FIELD = "hive-image-src-hash";
+	exports.IMAGE_CHAIN_HASH_FIELD = "hive-image-chain-hash";
+	exports.IMAGEHOSTER_CHALLENGE = "ImageSigningChallenge";
+	exports.IMAGE_SETTINGS_FIELDS = {
+		"cdn-scale": "1",
+		"cdn-quality": "0.8",
+		"chain-scale": "1",
+		"chain-quality": "1",
+		"chain-external": "",
+		"autoupload": ""
+	};
+
+	/*
+Return the image settings of a tiddler. The fields of the tiddler override
+the defaults that are given as config tiddlers, which in turn fall back to
+the built in defaults
+*/
+	exports.getImageSettings = function(tiddler,defaults) {
+		var fields = tiddler ? tiddler.fields : {},
+			settings = {cdn: {},chain: {},external: false,autoupload: false};
+		defaults = defaults || {};
+		function number(name,builtin) {
+			var raw = fields[name] !== undefined ? fields[name] : defaults[name],
+				parsed = parseFloat(raw);
+			if(!isNaN(parsed) && parsed >= 0 && parsed <= 1) {
+				return parsed;
+			}
+			return builtin;
+		}
+		// The scale and quality of the copy that is hosted on the image
+		// hoster of the Hive
+		settings.cdn.scale = number("hive-image-cdn-scale",1);
+		settings.cdn.quality = number("hive-image-cdn-quality",0.8);
+		// The scale and quality of the copy that is stored on the chain
+		settings.chain.scale = number("hive-image-chain-scale",1);
+		settings.chain.quality = number("hive-image-chain-quality",1);
+		// When no copy of the image is stored on the chain at all, the
+		// readers of the wiki load it from the image hoster
+		var external = fields["hive-image-chain-external"] !== undefined ? fields["hive-image-chain-external"] : defaults["hive-image-chain-external"];
+		settings.external = external === "yes" || external === true;
+		var autoupload = fields["hive-image-autoupload"] !== undefined ? fields["hive-image-autoupload"] : defaults["hive-image-autoupload"];
+		settings.autoupload = autoupload === "yes" || autoupload === true;
+		return settings;
+	};
+
+	/*
+Whether a tiddler holds binary content such as an image
+*/
+	exports.isImageTiddler = function(tiddler) {
+		if(!tiddler) {
+			return false;
+		}
+		var contentTypeInfo = $tw.config.contentTypeInfo[tiddler.fields.type || "text/vnd.tiddlywiki"];
+		return Boolean(contentTypeInfo && contentTypeInfo.encoding === "base64");
+	};
+
+	/*
+Decode a base64 text into bytes and encode bytes into a base64 text
+*/
+	exports.decodeBase64 = function(text) {
+		var binary = atob(String(text === undefined || text === null ? "" : text).replace(/\s+/g,"")),
+			bytes = new Uint8Array(binary.length);
+		for(var i = 0; i < binary.length; i++) {
+			bytes[i] = binary.charCodeAt(i);
+		}
+		return bytes;
+	};
+
+	exports.encodeBase64 = function(bytes) {
+		var chunk = 0x8000,
+			parts = [];
+		for(var i = 0; i < bytes.length; i += chunk) {
+			parts.push(String.fromCharCode.apply(null,bytes.subarray(i,i + chunk)));
+		}
+		return btoa(parts.join(""));
+	};
+
+	/*
+Serialize bytes as the JSON of a node buffer. The Hive Keychain signs
+such a message as the bytes themselves, which the image hoster of the
+Hive requires: the signature of an upload covers the sha256 of the
+challenge and the bytes of the image
+*/
+	exports.bufferJsonMessage = function(bytes) {
+		var data = new Array(bytes.length);
+		for(var i = 0; i < bytes.length; i++) {
+			data[i] = bytes[i];
+		}
+		return JSON.stringify({type: "Buffer",data: data});
+	};
+
+	/*
+Return the sha256 hash of the challenge and the bytes of an image, the
+value that the signature of an image upload covers. The hash is computed
+with the web crypto api, which is available in the secure contexts that
+the wiki runs in
+*/
+	exports.imageChallengeHash = function(bytes,callback) {
+		var prefix = new TextEncoder().encode(exports.IMAGEHOSTER_CHALLENGE),
+			data = new Uint8Array(prefix.length + bytes.length);
+		data.set(prefix);
+		data.set(bytes,prefix.length);
+		var subtle = (window.crypto || {}).subtle;
+		if(!subtle) {
+			return callback("The web crypto api is not available in this context, images cannot be signed for the upload");
+		}
+		subtle.digest("SHA-256",data).then(function(digest) {
+			var view = new Uint8Array(digest),
+				hex = "";
+			for(var i = 0; i < view.length; i++) {
+				hex += (view[i] < 16 ? "0" : "") + view[i].toString(16);
+			}
+			callback(null,hex);
+		},function(err) {
+			callback("Cannot hash the image for the upload: " + err.message);
+		});
+	};
+
+	/*
+Scale an image down and re-encode it. The text is the base64 data of the
+tiddler, the type its content type, and the options carry the scale (a
+fraction of the original width and height) and the quality (0..1) of the
+re-encoding. The callback is invoked with (err,result) where the result
+holds the base64 text and the content type of the copy, the size of the
+image and of its data, and a flag that tells whether the data changed at
+all. An image that is not scaled and re-encoded is returned unchanged,
+an animated image is not re-encoded either, because the canvas would
+lose all but the first frame
+*/
+	exports.transformImage = function(text,type,options,callback) {
+		options = options || {};
+		var scale = options.scale !== undefined ? options.scale : 1,
+			quality = options.quality !== undefined ? options.quality : 1;
+		text = String(text === undefined || text === null ? "" : text);
+		if((scale >= 1 || scale <= 0) && quality >= 1) {
+		// Nothing to scale or re-encode
+			return callback(null,{text: text,type: type,changed: false});
+		}
+		var bytes;
+		try {
+			bytes = exports.decodeBase64(text);
+		} catch(e) {
+			return callback("Cannot decode the image data: " + e.message);
+		}
+		var blob = new Blob([bytes],{type: type});
+		createImageBitmap(blob).then(function(source) {
+			// Animated images lose all but the first frame on the
+			// canvas, so they are kept as they are
+			if(type === "image/gif") {
+				return callback(null,{text: text,type: type,changed: false,width: source.width,height: source.height});
+			}
+			try {
+				var width = Math.max(1,Math.round(source.width * scale)),
+					height = Math.max(1,Math.round(source.height * scale)),
+					canvas = document.createElement("canvas");
+				canvas.width = width;
+				canvas.height = height;
+				var context = canvas.getContext("2d");
+				context.drawImage(source,0,0,width,height);
+				source.close();
+				canvas.toBlob(function(scaled) {
+					if(!scaled) {
+						return callback("Cannot re-encode the image");
+					}
+					scaled.arrayBuffer().then(function(buffer) {
+						var scaledBytes = new Uint8Array(buffer);
+						// The browser encodes into the format that it
+						// supports: webp when it can, png otherwise
+						var scaledType = scaled.type || type;
+						callback(null,{
+							text: exports.encodeBase64(scaledBytes),
+							type: scaledType,
+							changed: true,
+							width: width,
+							height: height,
+							bytes: scaledBytes.length
+						});
+					},function(err) {
+						callback("Cannot read the re-encoded image: " + err.message);
+					});
+				},type,quality);
+			} catch(e) {
+				callback("Cannot scale the image: " + e.message);
+			}
+		},function(err) {
+			callback("Cannot read the image of the tiddler: " + (err.message || err));
+		});
 	};
 
 })();

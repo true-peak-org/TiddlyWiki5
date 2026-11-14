@@ -1,0 +1,33 @@
+title: $:/plugins/tiddlywiki/hive/hive-images
+caption: Hive images
+
+This manager shows every image tiddler of the wiki and the copies that a save to Hive publishes. The ''hosted'' copy is uploaded to the image hoster of Hive and keeps the wiki light: the tiddler and the bodies that reference it store the url of the copy only. The ''on-chain'' copy is stored inside the replies of the wiki as base64 data and costs Hive Power (resource credits) to publish. A scaled or re-encoded copy is smaller and costs less, and with ''external only'' the hosted copy replaces it entirely.
+
+The settings of one image override the defaults in the control panel. A save uploads the hosted copies of the images that have ''upload on save'' ticked; the ''Upload'' button of an image uploads it immediately.
+
+<$list filter="[type[image/jpeg]] [type[image/png]] [type[image/gif]] [type[image/webp]] [type[image/svg+xml]] +[sort[title]]" variable="imgTitle">
+
+!!!<$view tiddler=<<imgTitle>> field="title"/>
+
+|<$hive-imagepreview title=<<imgTitle>> dest="cdn"/> |<$hive-imagepreview title=<<imgTitle>> dest="chain"/> |
+|!Hosted (images.hive.blog) |!On-chain (in the replies) |
+
+;Hosted copy scale and quality
+<$select tiddler=<<imgTitle>> field="hive-image-cdn-scale" default="1"><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></$select> <$select tiddler=<<imgTitle>> field="hive-image-cdn-quality" default="0.8"><option value="1">100%</option><option value="0.8">80%</option><option value="0.6">60%</option><option value="0.4">40%</option></$select>
+
+;On-chain copy scale and quality
+<$select tiddler=<<imgTitle>> field="hive-image-chain-scale" default="1"><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></$select> <$select tiddler=<<imgTitle>> field="hive-image-chain-quality" default="1"><option value="1">100%</option><option value="0.8">80%</option><option value="0.6">60%</option><option value="0.4">40%</option></$select>
+
+<$checkbox tiddler=<<imgTitle>> field="hive-image-chain-external">External only, no copy on the chain</$checkbox>
+
+<$checkbox tiddler=<<imgTitle>> field="hive-image-autoupload">Upload the hosted copy on save</$checkbox>
+
+<$button><$action-hiveuploadimage title=<<imgTitle>>/>Upload</$button>
+
+Hosted url: <$view tiddler=<<imgTitle>> field="hive-image-url"/>
+
+---
+
+</$list>
+
+''Status:'' <$list filter="[[$:/state/tiddlywiki/hive/status]get[text]]" variable="ignore"><$text text=<<ignore>>/></$list>

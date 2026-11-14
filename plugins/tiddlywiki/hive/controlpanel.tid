@@ -26,6 +26,19 @@ Publishing is always explicit: nothing is sent to the blockchain until you press
 
 ''Save to Hive'' always operates on the wiki that has been loaded last: when the configured account is not the owner of that wiki, the changes are broadcast as proposals that the owner can approve, and the root post of the wiki is not touched.
 
+!! Images
+
+The copies of the images that a save publishes are managed per image in the <$link to="$:/plugins/tiddlywiki/hive/hive-images">Hive images</$link> manager, which shows a preview of each copy. These defaults apply to images without settings of their own.
+
+|!Setting |!Value |
+|Hosted scale |<$select tiddler="$:/config/tiddlywiki/hive/image/cdn-scale" default=""><option value="">(per image)</option><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></$select> |
+|Hosted quality |<$select tiddler="$:/config/tiddlywiki/hive/image/cdn-quality" default=""><option value="">(per image)</option><option value="1">100%</option><option value="0.8">80%</option><option value="0.6">60%</option><option value="0.4">40%</option></$select> |
+|On-chain scale |<$select tiddler="$:/config/tiddlywiki/hive/image/chain-scale" default=""><option value="">(per image)</option><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></$select> |
+|On-chain quality |<$select tiddler="$:/config/tiddlywiki/hive/image/chain-quality" default=""><option value="">(per image)</option><option value="1">100%</option><option value="0.8">80%</option><option value="0.6">60%</option><option value="0.4">40%</option></$select> |
+|Image host |<$edit-text tiddler="$:/config/tiddlywiki/hive/image-host" tag="input" default="https://images.hive.blog"/> |
+
+The ''hosted'' copy is uploaded to the image hoster of Hive. The ''on-chain'' copy is stored inside the replies of the wiki and costs Hive Power: scale it down when the resource credits of the account are low. The image hoster scales images down itself, so an image that the browser cannot decode is uploaded as it is.
+
 !! Approve
 
 <$button><$action-hiveapprove/> Approve all outstanding</$button>

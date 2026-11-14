@@ -9,6 +9,7 @@ Usage:
 
 	<$button><$action-hivesave/>Save to Hive</$button>
 	<$button><$action-hiveload permlink="tw5-..."/>Load from Hive</$button>
+	<$button><$action-hiveuploadimage title="My image.webp"/>Upload</$button>
 
 \*/
 (function(){
@@ -50,6 +51,7 @@ Compute the internal state of the widget
 		this.action = this.getAttribute("action") || this.getDefaultAction();
 		this.author = this.getAttribute("author","");
 		this.canonical = this.getAttribute("canonical","no");
+		this.imageTitle = this.getAttribute("title","");
 		this.permlink = this.getAttribute("permlink","") || this.wiki.getTiddlerText("$:/config/tiddlywiki/hive/permalink") || "";
 		this.proposal = this.getAttribute("proposal","");
 		this.status = this.getAttribute("status","");
@@ -173,6 +175,20 @@ Invoke the action associated with this widget
 			store.load(this.permlink,function(err) {
 				self.report(err);
 			});
+		} else if(this.action === "uploadimage") {
+		// Upload one image tiddler to the image hoster of the Hive. The
+		// image is scaled and re-encoded by the image settings of the
+		// tiddler before it is uploaded
+			store.uploadImage(config,this.imageTitle,function(err,result) {
+				if(err) {
+					store.setStatus("Error: " + err);
+					$tw.utils.error("Hive: " + err);
+					return;
+				}
+				store.setStatus(result && result.unchanged ?
+					("The image " + self.imageTitle + " is hosted already at " + result.url) :
+					("The image " + self.imageTitle + " is hosted at " + result.url));
+			});
 		} else if(this.action === "inspect") {
 			// Prepare the operations of a save and show them in a preview
 			// tiddler, without broadcasting anything
@@ -256,5 +272,6 @@ be sent to Keychain for signing
 	exports["action-hivenew"] = HiveActionWidget;
 	exports["action-hiveapprove"] = HiveActionWidget;
 	exports["action-hiveproposal"] = HiveActionWidget;
+	exports["action-hiveuploadimage"] = HiveActionWidget;
 
 })();

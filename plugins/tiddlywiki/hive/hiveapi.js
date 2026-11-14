@@ -220,6 +220,34 @@ is invoked with (err,accounts)
 		});
 	};
 
+	/*
+Retrieve the resource credits of the given accounts, which hold the
+current mana and the maximum mana of the account. The ratio of the two is
+the share of the Hive Power that is available for transactions, and the
+difference between two readings of a save measures the cost of the save
+in mana per byte. The callback is invoked with (err,credits) where the
+credits hold the mana of each account by name
+*/
+	HiveApi.prototype.getRcAccounts = function(names,callback) {
+		this.request("rc_api.find_rc_accounts",{accounts: names},function(err,result) {
+			if(err) {
+				return callback(err);
+			}
+			var rcAccounts = (result && result.rc_accounts) || [],
+				credits = {};
+			names.forEach(function(name) {
+				credits[name] = null;
+			});
+			rcAccounts.forEach(function(account) {
+				credits[account.account] = {
+					current: parseFloat(account.current_mana) || 0,
+					max: parseFloat(account.max_rc) || 0
+				};
+			});
+			callback(null,credits);
+		});
+	};
+
 	HiveApi.prototype.log = function(message) {
 		if(this.logger) {
 			this.logger.log(message);
