@@ -239,8 +239,11 @@ credits hold the mana of each account by name
 				credits[name] = null;
 			});
 			rcAccounts.forEach(function(account) {
+			// The modern rc api nests the mana of the manabar in the
+			// account object; older versions had it at the top level
+				var manabar = account.rc_manabar || account;
 				credits[account.account] = {
-					current: parseFloat(account.current_mana) || 0,
+					current: parseFloat(manabar.current_mana) || 0,
 					max: parseFloat(account.max_rc) || 0
 				};
 			});
