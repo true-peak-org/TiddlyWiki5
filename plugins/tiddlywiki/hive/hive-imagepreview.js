@@ -32,6 +32,7 @@ settings change.
 
 	var Widget = require("$:/core/modules/widgets/widget.js").widget,
 		HiveStore = require("$:/plugins/tiddlywiki/hive/hivestore.js").HiveStore,
+		HiveApi = require("$:/plugins/tiddlywiki/hive/hiveapi.js").HiveApi,
 		util = require("$:/plugins/tiddlywiki/hive/hiveutil.js");
 
 	var HiveImagePreviewWidget = function(parseTreeNode,options) {
@@ -152,6 +153,15 @@ thumbnails and the information line
 			token = ++this.previewToken,
 			store = new HiveStore({wiki: this.wiki}),
 			tiddler = this.wiki.getTiddler(title);
+		// The store of the preview shares one api object with the other
+		// previews, so that the resource data of the chain is fetched
+		// once and cached for all of them. Tests can inject a mock api
+		// into $tw.hiveApi
+		if(!store.api) {
+			var config = store.getConfig();
+			$tw.hiveApi = $tw.hiveApi || new HiveApi({rpc: config.rpc});
+			store.api = $tw.hiveApi;
+		}
 		this.revokeImage();
 		this.previewObjectUrls = [];
 		function info(text,important) {
@@ -203,21 +213,33 @@ thumbnails and the information line
 			// The dimensions of a copy that is kept as it is are read from
 			// the image itself, the fast path of the transform does not
 			// report them
+			var estimate = null;
+			if(self.previewDest === "chain") {
+				estimate = self.estimateChainCost(store,tiddler,transformed);
+			}
+			// The wording of the share of the available Hive Power: the
+			// live estimate of the chain has no note, the measurement of
+			// the last save says where it comes from
+			var rcSegment = function(share) {
+				var note = share.source === "measured" ? " (measured at the last save)" : "";
+				return share.tooMuch ?
+					(", \u2248 " + share.percent + "% of the available Hive Power" + note + ": the save will be stopped, scale this copy down") :
+					(", \u2248 " + share.percent + "% of the available Hive Power" + note);
+			};
 			var finish = function(dims) {
 				if(token !== self.previewToken) {
 					return;
 				}
-				var label;
-				if(self.previewDest === "chain") {
-					var estimate = self.estimateChainCost(store,tiddler,transformed),
-						rc = self.estimateRcShare(store,estimate.bytes);
+				var label,
+					tooMuch = false;
+				if(self.previewDest === "chain" && estimate) {
+					var rc = self.estimateRcShare(store,estimate.bytes);
 					label = (transformed.changed ? "copy: " : "kept as is: ") +
 						(dims ? dims.width + "\u00d7" + dims.height + ", " : "") + kB(transformed.text.length) + " kB" + comparison +
 						", " + estimate.parts + " part(s) \u2248 " + kBp(estimate.bytes) + " kB posted";
 					if(rc !== null) {
-						label += rc.tooMuch ?
-							(", \u2248 " + rc.percent + "% of the available Hive Power: the save will be stopped, scale this copy down") :
-							(", \u2248 " + rc.percent + "% of the available Hive Power");
+						tooMuch = rc.tooMuch;
+						label += rcSegment({source: "measured",percent: rc.percent,tooMuch: rc.tooMuch});
 					}
 				} else {
 					label = (transformed.changed ? "upload: " : "uploads as is: ") +
@@ -241,7 +263,21 @@ thumbnails and the information line
 						captions[0].textContent = caption;
 					}
 				}
-				info(label,!!(self.previewDest === "chain" && label.indexOf("stopped") !== -1));
+				info(label,tooMuch);
+				if(self.previewDest === "chain" && estimate) {
+				// The live estimate of the chain replaces the measurement
+				// of the last save as soon as it is readable, because it
+				// does not need a previous save of this app
+					var config = store.getConfig();
+					store.getRcShare(config,estimate.operations,function(err,share) {
+						if(!err && share && share.source === "curve" && token === self.previewToken) {
+							var liveLabel = /, \u2248 [0-9]+% of the available Hive Power/.test(label) ?
+								label.replace(/, \u2248 [0-9]+% of the available Hive Power.*$/,rcSegment(share)) :
+								label + rcSegment(share);
+							info(liveLabel,share.tooMuch);
+						}
+					});
+				}
 			};
 			if(transformed.width) {
 				finish({width: transformed.width,height: transformed.height});
@@ -263,7 +299,8 @@ Estimate the size of the operations that a save broadcasts for the given
 transformed copy of the image: the payload is split into the parts that
 fit into a reply, and each part is broadcast as its own transaction. The
 callback is not needed, the estimate is synchronous. Returns an object
-with the number of parts and the total number of bytes of the operations
+with the number of parts, the total number of bytes of the operations and
+the operations themselves, for the live estimate of the resource credits
 	*/
 	HiveImagePreviewWidget.prototype.estimateChainCost = function(store,tiddler,transformed) {
 		var payload = util.getTiddlerPayload(tiddler);
@@ -276,7 +313,8 @@ with the number of parts and the total number of bytes of the operations
 			payload.fields.type = transformed.type || tiddler.fields.type;
 		}
 		var parts = store.splitPayload(payload),
-			bytes = 0;
+			bytes = 0,
+			operations = [];
 		parts.forEach(function(part,index) {
 			var operation = {
 				type: "comment",
@@ -289,8 +327,9 @@ with the number of parts and the total number of bytes of the operations
 				json_metadata: JSON.stringify({app: "tw5",tw5: part})
 			};
 			bytes += util.getOperationSize(operation);
+			operations.push(operation);
 		});
-		return {parts: parts.length || 1,bytes: bytes};
+		return {parts: parts.length || 1,bytes: bytes,operations: operations};
 	};
 
 	/*
@@ -307,6 +346,7 @@ save is stopped
 		}
 		var percent = Math.round(100 * state.rcPerByte * bytes / state.rc.current);
 		return {
+			source: "measured",
 			percent: percent,
 			tooMuch: percent >= 95
 		};

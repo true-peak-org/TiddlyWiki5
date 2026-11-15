@@ -315,6 +315,16 @@ js.configs.recommended,
 },
     es2017rules,
     es2023rules,
+    // The hive plugin needs BigInt (ES2020) for the price curve of the
+    // Hive resource credits: its intermediate products exceed the range
+    // of a javascript number. Code that runs on a browser without BigInt
+    // falls back to the measured cost of the last save
+    {
+        files: ["plugins/tiddlywiki/hive/**/*.js"],
+        rules: {
+            "es-x/no-bigint": "off"
+        }
+    },
     {
         files: ["tiddlywiki.js"],
         plugins:  {

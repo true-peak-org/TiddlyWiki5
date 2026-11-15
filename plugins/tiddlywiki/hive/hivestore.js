@@ -1289,13 +1289,43 @@ retried shortly after a failed one does not collide with it
 		}
 		var index = 0,
 			results = [],
-			// The cost of a broadcast is estimated from the cost of the
-			// previous save in mana per byte, and the readings of the
-			// resource credits of this save measure the cost of this one
+			// The cost of a broadcast is estimated either exactly with the
+			// price curve of the chain, or from the cost of the previous
+			// save in mana per byte, and the readings of the resource
+			// credits of this save measure the cost of this one
 			state = this.getRemoteState() || {},
 			rcPerByte = state.rcPerByte || null,
 			rcAvailable = rc ? rc.current : null,
-			rcSpent = 0;
+			rcMax = rc ? rc.max : null,
+			rcSpent = 0,
+			// The exact cost of every transaction according to the price
+			// curve of the chain, when its data is readable
+			opCosts = null,
+			totalCost = null;
+		function stop() {
+			var projected,
+				projectedTotal;
+			if(opCosts && rcAvailable !== null) {
+			// The exact projection: the sum of the costs of the
+			// transactions of this save
+				projectedTotal = totalCost;
+				projected = 0n;
+				for(var i = 0; i <= index; i++) {
+					projected += opCosts[i];
+				}
+				projected = Number(projected);
+			} else if(rcPerByte && rcAvailable !== null) {
+				projected = rcPerByte * (rcSpent + util.getOperationSize(operations[index]));
+				projectedTotal = rcPerByte * operations.reduce(function(sum,op) { return sum + util.getOperationSize(op); },0);
+			} else {
+				return false;
+			}
+			if(projected <= rcAvailable * 0.95) {
+				return false;
+			}
+			callback("Not enough Hive Power (resource credits): " + index + " transaction(s) of this save are broadcast already, but broadcasting all " + operations.length + " is projected to cost about " + Math.round(100 * Number(projectedTotal) / rcAvailable) + "% of the credits that are available now, and only " + Math.round(100 * rcAvailable / (rcMax || rcAvailable)) + "% of them are left. The save was stopped before the chain could reject it for lack of Hive Power. The parts that are broadcast already are kept on the chain and are not broadcast again: reduce the sizes, for example scale the copies of the images down in the image manager, or wait for the credits to regenerate, and save again.");
+			return true;
+		}
 		function next() {
 			if(index >= operations.length) {
 				return callback(null,results);
@@ -1305,12 +1335,8 @@ retried shortly after a failed one does not collide with it
 			if(size > util.MAX_TRANSACTION_LENGTH) {
 				return callback("The operation " + operation.permlink + " is " + size + " characters long and does not fit into a Hive transaction");
 			}
-			if(rcPerByte && rcAvailable !== null) {
-				var projected = rcPerByte * (rcSpent + size),
-					projectedTotal = rcPerByte * operations.reduce(function(sum,op) { return sum + util.getOperationSize(op); },0);
-				if(projected > rcAvailable * 0.95) {
-					return callback("Not enough Hive Power (resource credits): " + index + " transaction(s) of this save are broadcast already, but broadcasting all " + operations.length + " is projected to cost about " + Math.round(100 * projectedTotal / rcAvailable) + "% of the credits that are available now, and only " + Math.round(100 * rcAvailable / rc.max) + "% of them are left. The save was stopped before the chain could reject it for lack of Hive Power. The parts that are broadcast already are kept on the chain and are not broadcast again: reduce the sizes, for example scale the copies of the images down in the image manager, or wait for the credits to regenerate, and save again.");
-				}
+			if(stop()) {
+				return;
 			}
 			self.waitReplyInterval(config,function() {
 				index++;
@@ -1332,7 +1358,29 @@ retried shortly after a failed one does not collide with it
 				});
 			});
 		}
-		next();
+		// The exact cost of the transactions is estimated from the live
+		// data of the chain before anything is broadcast; the credits of
+		// an older save are not needed for it. The measured cost of the
+		// last save remains as the fallback
+		this.estimateRcCost(config,operations,function(err,estimate) {
+			if(estimate) {
+				opCosts = estimate.perOperation;
+				totalCost = estimate.total;
+			}
+			if(rcAvailable === null) {
+			// The credits of this save are not known yet: read them, so
+			// that the projection can compare the cost with what is left
+				self.getRcStatus(config,function(err,credit) {
+					if(!err && credit) {
+						rcAvailable = credit.current;
+						rcMax = credit.max;
+					}
+					next();
+				});
+			} else {
+				next();
+			}
+		});
 	};
 
 	/*
@@ -1766,7 +1814,7 @@ maximum mana and the share of the mana that is available
 		if(!config.account) {
 			return callback("No Hive account name has been configured");
 		}
-		if(!this.api) {
+		if(!this.api || !this.api.getRcAccounts) {
 			return callback("The Hive api is not available");
 		}
 		this.api.getRcAccounts([config.account],function(err,credits) {
@@ -1779,6 +1827,190 @@ maximum mana and the share of the mana that is available
 			}
 			credit.percent = credit.max > 0 ? Math.round(100 * credit.current / credit.max) : 0;
 			callback(null,credit);
+		});
+	};
+
+	/*
+Compute the cost of a resource count with the price curve of the chain.
+The count is the number of units of the resource, the pool level is what
+is left of the resource pool, and rcRegen is the mana that the chain
+regenerates per block. All the numbers are BigInt, because the
+intermediate products exceed the range of a javascript number
+	*/
+	var computeCurveCost = function(rcRegen,curve,poolLevel,count) {
+		if(count <= 0n) {
+			return 0n;
+		}
+		var num = rcRegen * BigInt(curve.coeff_a);
+		num >>= BigInt(curve.shift);
+		num += 1n;
+		num *= count;
+		var denom = BigInt(curve.coeff_b) + (poolLevel > 0n ? poolLevel : 0n);
+		return num / denom + 1n;
+	};
+
+	/*
+Count the resources that a single transaction with the given comment
+operation consumes, with the algorithm of the chain itself: the bytes of
+the serialized transaction for the history, the state bytes of the
+comment and the execution time of the operation and the signature. The
+keys of the returned object are the names of the resources, the values
+are the raw counts before the resource unit is applied
+	*/
+	var countOperationResources = function(operation,sizeInfo,execInfo) {
+		var counts = {};
+		// The transaction costs its serialized size as history bytes, and
+		// one hour of the expiration as transaction state. The Keychain
+		// broadcasts with an expiration of one hour and one signature
+		counts.resource_history_bytes = util.getOperationSize(operation);
+		counts.resource_state_bytes = BigInt(sizeInfo.transaction_base_size);
+		counts.resource_execution_time = BigInt(execInfo.transaction_time) + BigInt(execInfo.verify_authority_time);
+		if(operation.type === "comment") {
+			counts.resource_state_bytes += BigInt(sizeInfo.comment_base_size)
+				+ BigInt(sizeInfo.comment_permlink_char_size) * BigInt(operation.permlink.length);
+			counts.resource_execution_time += BigInt(execInfo.comment_time);
+		} else {
+		// Only comment operations are broadcast by the plugin; an unknown
+		// operation is charged as a custom json, which is of the same
+		// order of magnitude
+			counts.resource_execution_time += BigInt(execInfo.custom_json_time || 0);
+		}
+		counts.resource_new_accounts = 0;
+		counts.resource_market_bytes = 0;
+		return counts;
+	};
+
+	/*
+Estimate the cost of the given operations in resource credits with the
+live data of the chain: the resource parameters, the levels of the
+resource pools and the total vesting shares, and the price curve
+algorithm of hived itself. This works on a wiki that has never saved,
+because nothing of the wiki is needed, only the chain data. The callback
+is invoked with (err,estimate) where estimate is null when the data of
+the chain is not readable, and otherwise holds a BigInt cost per
+operation and the BigInt total cost of the save
+	*/
+	HiveStore.prototype.estimateRcCost = function(config,operations,callback) {
+		var api = this.api;
+		if(!api || !api.getRcParams || !api.getRcPool || !api.getTotalVestingShares || typeof BigInt === "undefined") {
+			return callback(null,null);
+		}
+		var finish = function(params,pool,tvs) {
+			if(!params || !pool || !tvs) {
+				return callback(null,null);
+			}
+			var sizeInfo = params.size_info && params.size_info.resource_state_bytes,
+				execInfo = params.size_info && params.size_info.resource_execution_time;
+			if(!sizeInfo || !execInfo || !sizeInfo.comment_base_size || !sizeInfo.transaction_base_size) {
+			// A resource_params that does not hold the modern size info
+			// cannot be counted
+				return callback(null,null);
+			}
+			var rcRegen = tvs / 144000n;
+			if(rcRegen <= 0n) {
+				return callback(null,null);
+			}
+			try {
+				var perOperation = [],
+					total = 0n;
+				operations.forEach(function(operation) {
+					var counts = countOperationResources(operation,sizeInfo,execInfo),
+						cost = 0n;
+					params.resource_names.forEach(function(name) {
+						var resourceParams = params.resource_params[name];
+						if(!resourceParams || !resourceParams.price_curve_params) {
+							throw new Error("no price curve of " + name);
+						}
+						var unit = BigInt(resourceParams.resource_dynamics_params.resource_unit),
+							poolLevel = BigInt((pool[name] && pool[name].pool) || 0);
+						cost += computeCurveCost(rcRegen,resourceParams.price_curve_params,poolLevel,BigInt(counts[name] || 0) * unit);
+					});
+					perOperation.push(cost);
+					total += cost;
+				});
+				callback(null,{perOperation: perOperation,total: total});
+			} catch(e) {
+				callback(null,null);
+			}
+		};
+		var params = null,
+			pool = null,
+			tvs = null,
+			err = null;
+		var done = function() {
+			if(err) {
+				return callback(null,null);
+			}
+			if(params !== null && pool !== null && tvs !== null) {
+				finish(params,pool,tvs);
+			}
+		};
+		api.getRcParams(function(e,result) {
+			err = err || e;
+			params = e ? null : result;
+			done();
+		});
+		api.getRcPool(function(e,result) {
+			err = err || e;
+			pool = e ? null : result;
+			done();
+		});
+		api.getTotalVestingShares(function(e,result) {
+			err = err || e;
+			tvs = e ? null : result;
+			done();
+		});
+	};
+
+	/*
+Estimate the share of the available Hive Power that the given operations
+cost. The share is computed from the live data of the chain when it is
+readable, which works on a wiki that has never saved with this app, and
+otherwise from the measurement of the cost of the last save. The callback
+is invoked with (err,share) where share is null when no estimate is
+possible, and otherwise holds the percent of the available credits, the
+cost, the credits and their source: "curve" for the live estimate and
+"measured" for the last save
+	*/
+	HiveStore.prototype.getRcShare = function(config,operations,callback) {
+		var self = this;
+		config = config || this.getConfig();
+		this.getRcStatus(config,function(err,credit) {
+			if(err || !credit || !credit.current) {
+				credit = null;
+			}
+			self.estimateRcCost(config,operations,function(err,estimate) {
+				if(estimate && credit) {
+					var cost = Number(estimate.total),
+						percent = Math.round(100 * cost / credit.current);
+					return callback(null,{
+						source: "curve",
+						cost: cost,
+						bytes: util.getBatchSize(operations),
+						current: credit.current,
+						max: credit.max,
+						percent: percent,
+						tooMuch: Number(estimate.total) > credit.current * 0.95
+					});
+				}
+				// The fallback: the measurement of the last save, which is
+				// only known when this app has broadcast before
+				var state = self.getRemoteState() || {};
+				if(state.rcPerByte && state.rc && state.rc.current) {
+					var bytes = util.getBatchSize(operations),
+						measuredPercent = Math.round(100 * state.rcPerByte * bytes / state.rc.current);
+					return callback(null,{
+						source: "measured",
+						cost: state.rcPerByte * bytes,
+						bytes: bytes,
+						current: state.rc.current,
+						max: state.rc.max,
+						percent: measuredPercent,
+						tooMuch: measuredPercent >= 95
+					});
+				}
+				callback(null,null);
+			});
 		});
 	};
 

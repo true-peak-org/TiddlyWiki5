@@ -248,6 +248,88 @@ credits hold the mana of each account by name
 		});
 	};
 
+	/*
+Helper for a cache of api results: returns a cached value immediately if
+it is younger than the given age in ms, otherwise it fetches it and fills
+the cache. A concurrent fetch is shared
+	*/
+	HiveApi.prototype.cachedRequest = function(cacheName,maxAge,method,params,transform,callback) {
+		var self = this,
+			cache = this[cacheName];
+		if(cache && (Date.now() - cache.time) < maxAge) {
+			return callback(null,cache.value);
+		}
+		if(cache && cache.pending) {
+			cache.pending.push(callback);
+			return;
+		}
+		var pending = [callback];
+		this[cacheName] = {pending: pending,time: 0,value: null};
+		this.request(method,params,function(err,result) {
+			if(err) {
+			// A failed fetch is not cached, the next caller tries again
+				self[cacheName] = null;
+				pending.forEach(function(pendingCallback) {
+					pendingCallback(err);
+				});
+				return;
+			}
+			var value = transform ? transform(result) : result;
+			self[cacheName] = {pending: null,time: Date.now(),value: value};
+			pending.forEach(function(pendingCallback) {
+				pendingCallback(null,value);
+			});
+		});
+	};
+
+	/*
+Retrieve the resource parameters of the chain: the names of the counted
+resources, their unit and price curve, and the sizes of the counted
+objects. The values only change with a version of hived, so the result is
+cached forever. The callback is invoked with (err,params)
+	*/
+	HiveApi.prototype.getRcParams = function(callback) {
+		this.cachedRequest("rcParamsCache",Infinity,"rc_api.get_resource_params",{},null,callback);
+	};
+
+	/*
+Retrieve the resource pools of the chain: how much of each resource is
+left. The pools refill continuously, so the result is cached for a few
+minutes only. The callback is invoked with (err,pools)
+	*/
+	HiveApi.prototype.getRcPool = function(callback) {
+		this.cachedRequest("rcPoolCache",5 * 60 * 1000,"rc_api.get_resource_pool",{},function(result) {
+			return (result && result.resource_pool) || null;
+		},callback);
+	};
+
+	/*
+Retrieve the total vesting shares of the chain, which the price curve
+needs as the regeneration of mana per block: rc_regen is the total
+vesting shares divided by the number of blocks of the regeneration time
+of 5 days. The callback is invoked with (err,tvs) where tvs is a BigInt
+	*/
+	HiveApi.prototype.getTotalVestingShares = function(callback) {
+		this.cachedRequest("tvsCache",60 * 1000,"condenser_api.get_dynamic_global_properties",[],function(result) {
+			return HiveApi.prototype.parseVests(result && result.total_vesting_shares);
+		},callback);
+	};
+
+	/*
+Parse an asset string such as "349859519224.688512 VESTS" into the full
+integer amount of its 6 decimals as a BigInt. Returns null for a value
+that cannot be parsed
+	*/
+	HiveApi.prototype.parseVests = function(text) {
+		var match = /^([\d.]+)\s*VESTS$/.exec(String(text || "").trim());
+		if(!match) {
+			return null;
+		}
+		var parts = match[1].split("."),
+			fraction = ((parts[1] || "") + "000000").slice(0,6);
+		return BigInt(parts[0] || "0") * 1000000n + BigInt(fraction);
+	};
+
 	HiveApi.prototype.log = function(message) {
 		if(this.logger) {
 			this.logger.log(message);
