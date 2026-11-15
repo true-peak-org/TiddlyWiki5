@@ -573,6 +573,10 @@ stored with the remote state in the background
 				var state = self.getRemoteState() || {};
 				state.rcPerByte = perByte;
 				state.rcMeasured = $tw.utils.stringifyDate(new Date());
+				// The credits that were available are kept with the
+				// measurement, so that the image previews can estimate the
+				// cost of the copies of an image without reading the chain
+				state.rc = {current: rc.current,max: rc.max};
 				self.setRemoteState(state);
 			}
 		});

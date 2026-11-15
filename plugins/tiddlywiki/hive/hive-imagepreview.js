@@ -4,9 +4,12 @@ type: application/javascript
 module-type: widget
 
 Preview widget for the copies of an image that a save to Hive publishes.
-It shows the image that results from the image settings of the tiddler and
-its size, so that the copy that is uploaded to the image hoster of Hive and
-the copy that is stored on the chain can be judged before a save.
+It shows the original image next to the copy that results from the image
+settings of the tiddler, so that the loss of quality can be judged, and it
+shows how large the copy is before anything is uploaded: the size of the
+upload to the image hoster of Hive, and for the on-chain copy the number
+of parts that are posted and the share of the Hive Power (resource
+credits) that the copy is estimated to cost.
 
 Usage:
 
@@ -15,8 +18,10 @@ Usage:
 
 The dest attribute selects the copy: "cdn" is the hosted copy that is
 uploaded to images.hive.blog, "chain" is the copy that is stored inside the
-replies of the wiki. Without a dest the hosted copy is shown. The widget
-updates itself when the tiddler or its image settings change.
+replies of the wiki. Without a dest the hosted copy is shown. The optional
+size attribute gives the largest side of a preview image in pixels
+(default 150). The widget updates itself when the tiddler or its image
+settings change.
 
 \*/
 (function(){
@@ -44,7 +49,9 @@ Compute the internal state of the widget
 	HiveImagePreviewWidget.prototype.execute = function() {
 		this.previewTitle = this.getAttribute("title","");
 		this.previewDest = this.getAttribute("dest","cdn") === "chain" ? "chain" : "cdn";
+		this.previewSize = Math.max(32,parseInt(this.getAttribute("size","150"),10) || 150);
 		this.previewToken = 0;
+		this.previewObjectUrls = [];
 	};
 
 	/*
@@ -66,15 +73,19 @@ Render the container of the preview and start the computation of the copy
 		this.parentDomNode = parent;
 		this.computeAttributes();
 		this.execute();
-		// The container holds the image and the information line that the
-		// computation fills in
+		// The container holds the thumbnails and the information line that
+		// the computation fills in
 		this.domNode = this.document.createElement("div");
 		this.domNode.className = "hive-imagepreview";
 		this.domNode.setAttribute("data-hive-dest",this.previewDest);
-		this.domNode.style.cssText = "display:inline-block;vertical-align:top;margin:0.5em 0.5em 0.5em 0;text-align:center;";
+		this.domNode.style.cssText = "display:inline-block;vertical-align:top;margin:0.5em 1em 0.5em 0;text-align:center;";
+		this.thumbsNode = this.document.createElement("span");
+		this.thumbsNode.className = "hive-imagepreview-thumbs";
+		this.thumbsNode.style.cssText = "display:flex;align-items:flex-start;justify-content:center;gap:0.75em;";
+		this.domNode.appendChild(this.thumbsNode);
 		this.infoNode = this.document.createElement("span");
 		this.infoNode.className = "hive-imagepreview-info";
-		this.infoNode.style.cssText = "display:block;font-size:0.85em;color:#666;white-space:nowrap;";
+		this.infoNode.style.cssText = "display:block;font-size:0.85em;color:#444;margin-top:0.4em;white-space:nowrap;";
 		this.infoNode.textContent = "preparing ...";
 		this.domNode.appendChild(this.infoNode);
 		parent.insertBefore(this.domNode,nextSibling);
@@ -84,8 +95,56 @@ Render the container of the preview and start the computation of the copy
 	};
 
 	/*
+Create one thumbnail with a caption below it and append it to the row of
+thumbnails. Returns the img element
+	*/
+	HiveImagePreviewWidget.prototype.addThumbnail = function(objectUrl,caption,captionClass) {
+		var thumb = this.document.createElement("span"),
+			image = this.document.createElement("img"),
+			label = this.document.createElement("span");
+		thumb.style.cssText = "display:inline-block;";
+		image.className = "hive-imagepreview-image";
+		image.title = this.previewTitle;
+		image.alt = caption;
+		image.style.cssText = "max-width:" + this.previewSize + "px;max-height:" + this.previewSize + "px;display:block;margin:0 auto;border:1px solid #ccc;background:#fafafa;";
+		image.src = objectUrl;
+		label.className = captionClass || "hive-imagepreview-caption";
+		label.style.cssText = "display:block;font-size:0.8em;color:#666;margin-top:0.2em;";
+		label.textContent = caption;
+		thumb.appendChild(image);
+		thumb.appendChild(label);
+		this.thumbsNode.appendChild(thumb);
+		return image;
+	};
+
+	/*
+Make an object url of the given base64 text of an image, or null when the
+text cannot be decoded. The url is registered for the cleanup
+	*/
+	HiveImagePreviewWidget.prototype.makeObjectUrl = function(text,type) {
+		try {
+			var bytes = util.decodeBase64(text),
+				objectUrl = URL.createObjectURL(new Blob([bytes],{type: type || "application/octet-stream"}));
+			this.previewObjectUrls.push(objectUrl);
+			return objectUrl;
+		} catch(e) {
+			return null;
+		}
+	};
+
+	/*
+Revoke the object urls of the previous preview images
+	*/
+	HiveImagePreviewWidget.prototype.revokeImage = function() {
+		this.previewObjectUrls.forEach(function(objectUrl) {
+			URL.revokeObjectURL(objectUrl);
+		});
+		this.previewObjectUrls = [];
+	};
+
+	/*
 Compute the copy of the image that this preview shows and fill in the
-image and the information line
+thumbnails and the information line
 	*/
 	HiveImagePreviewWidget.prototype.compute = function() {
 		var self = this,
@@ -94,81 +153,167 @@ image and the information line
 			store = new HiveStore({wiki: this.wiki}),
 			tiddler = this.wiki.getTiddler(title);
 		this.revokeImage();
-		function info(text) {
+		this.previewObjectUrls = [];
+		function info(text,important) {
 			if(token === self.previewToken && self.infoNode) {
 				self.infoNode.textContent = text;
+				self.infoNode.style.color = important ? "#a33" : "#444";
 			}
 		}
 		if(!tiddler || !util.isImageTiddler(tiddler)) {
 			return info(title + ": not an image tiddler");
 		}
 		var text = String(tiddler.fields.text || ""),
-			url = tiddler.fields[util.IMAGE_URL_FIELD];
+			url = tiddler.fields[util.IMAGE_URL_FIELD],
+			type = tiddler.fields.type;
 		if(!text) {
 		// The tiddler holds the hosted copy only, for example because it
 		// was loaded from the chain
-			return info(url ? (title + ": hosted copy only, " + this.previewDest + " copy is empty") : (title + ": no image data"));
+			return info(url ? (title + ": hosted copy only, the " + this.previewDest + " copy is empty") : (title + ": no image data"));
+		}
+		// The original is always shown, so that the copy can be compared
+		// with it
+		var originalUrl = this.makeObjectUrl(text,type),
+			originalChars = text.length;
+		if(originalUrl) {
+			this.addThumbnail(originalUrl,"original");
 		}
 		var settings = util.getImageSettings(tiddler,store.getImageDefaults()),
-			options = this.previewDest === "chain" ? settings.chain : settings.cdn;
-		util.transformImage(text,tiddler.fields.type,options,function(err,transformed) {
+			options = this.previewDest === "chain" ? settings.chain : settings.cdn,
+			caption = this.previewDest === "chain" ? "on-chain copy" : "hosted copy";
+		util.transformImage(text,type,options,async function(err,transformed) {
 			if(err) {
-				return info(title + ": cannot be transformed (" + err + ")");
+				return info(title + ": cannot be transformed (" + err + ")",true);
 			}
 			if(token !== self.previewToken) {
 				return;
 			}
-			var resultType = transformed.type || tiddler.fields.type,
+			var resultType = transformed.type || type,
+				// base64 is 4 characters per 3 bytes
 				kB = function(chars) {
-					// base64 is 4 characters per 3 bytes
 					return (chars * 0.75 / 1024).toFixed(chars * 0.75 >= 102400 ? 0 : 1);
 				},
-				label;
-			if(self.previewDest === "chain") {
-				var parts = Math.ceil(transformed.text.length / store.MAX_TEXT_LENGTH) || 1;
-				label = transformed.changed ? "copy: " : "kept as is: ";
-				label += transformed.width + "\u00d7" + transformed.height + ", " + kB(transformed.text.length) + " kB, " + parts + " part(s) on the chain";
-			} else {
-				label = (transformed.changed ? "upload: " : "uploads as is: ") +
-					(transformed.width ? transformed.width + "\u00d7" + transformed.height + ", " : "") +
-					kB(transformed.text.length) + " kB";
-			}
-			info(label);
-			// Show the resulting image below the information line
-			try {
-				var bytes = util.decodeBase64(transformed.text),
-					blob = new Blob([bytes],{type: resultType}),
-					objectUrl = URL.createObjectURL(blob),
-					image = self.document.createElement("img");
-				self.previewObjectUrl = objectUrl;
-				image.className = "hive-imagepreview-image";
-				image.title = title;
-				image.style.cssText = "max-width:96px;max-height:96px;display:block;margin:0.25em auto;";
-				image.onload = function() {
-					if(token !== self.previewToken) {
-						URL.revokeObjectURL(objectUrl);
-					}
+				saved = originalChars > 0 ? Math.round(100 * (1 - transformed.text.length / originalChars)) : 0,
+				comparison = transformed.changed ? ", " + (saved > 0 ? "\u2212" + saved + "%" : "+" + (-saved) + "%") + " (" + kB(originalChars) + " kB original)" : "",
+				// The bytes of the operations are counted directly, unlike
+				// the base64 characters of the image data
+				kBp = function(bytes) {
+					return (bytes / 1024).toFixed(bytes >= 102400 ? 0 : 1);
 				};
-				image.src = objectUrl;
-				self.domNode.insertBefore(image,self.infoNode);
-			} catch(e) {
-				info(label + " (the image cannot be shown: " + e.message + ")");
+			// The dimensions of a copy that is kept as it is are read from
+			// the image itself, the fast path of the transform does not
+			// report them
+			var finish = function(dims) {
+				if(token !== self.previewToken) {
+					return;
+				}
+				var label;
+				if(self.previewDest === "chain") {
+					var estimate = self.estimateChainCost(store,tiddler,transformed),
+						rc = self.estimateRcShare(store,estimate.bytes);
+					label = (transformed.changed ? "copy: " : "kept as is: ") +
+						(dims ? dims.width + "\u00d7" + dims.height + ", " : "") + kB(transformed.text.length) + " kB" + comparison +
+						", " + estimate.parts + " part(s) \u2248 " + kBp(estimate.bytes) + " kB posted";
+					if(rc !== null) {
+						label += rc.tooMuch ?
+							(", \u2248 " + rc.percent + "% of the available Hive Power: the save will be stopped, scale this copy down") :
+							(", \u2248 " + rc.percent + "% of the available Hive Power");
+					}
+				} else {
+					label = (transformed.changed ? "upload: " : "uploads as is: ") +
+						(dims ? dims.width + "\u00d7" + dims.height + ", " : "") +
+						kB(transformed.text.length) + " kB" + comparison;
+				}
+				// The copy is only shown next to the original when it
+				// differs from it, otherwise the original alone is the
+				// preview and its caption names the copy that is published
+				if(transformed.changed) {
+					var resultUrl = self.makeObjectUrl(transformed.text,resultType);
+					if(resultUrl) {
+						self.addThumbnail(resultUrl,caption);
+					} else {
+						info(label + " (the copy cannot be shown)",true);
+						return;
+					}
+				} else if(originalUrl) {
+					var captions = self.thumbsNode.querySelectorAll(".hive-imagepreview-caption");
+					if(captions.length) {
+						captions[0].textContent = caption;
+					}
+				}
+				info(label,!!(self.previewDest === "chain" && label.indexOf("stopped") !== -1));
+			};
+			if(transformed.width) {
+				finish({width: transformed.width,height: transformed.height});
+			} else {
+				try {
+					var bitmap = await createImageBitmap(new Blob([util.decodeBase64(transformed.text)],{type: resultType}));
+					var dims = {width: bitmap.width,height: bitmap.height};
+					bitmap.close();
+					finish(dims);
+				} catch(e) {
+					finish(null);
+				}
 			}
 		});
 	};
 
 	/*
-Revoke the object url of the previous preview image, if any
+Estimate the size of the operations that a save broadcasts for the given
+transformed copy of the image: the payload is split into the parts that
+fit into a reply, and each part is broadcast as its own transaction. The
+callback is not needed, the estimate is synchronous. Returns an object
+with the number of parts and the total number of bytes of the operations
 	*/
-	HiveImagePreviewWidget.prototype.revokeImage = function() {
-		if(this.previewObjectUrl) {
-			URL.revokeObjectURL(this.previewObjectUrl);
-			this.previewObjectUrl = null;
+	HiveImagePreviewWidget.prototype.estimateChainCost = function(store,tiddler,transformed) {
+		var payload = util.getTiddlerPayload(tiddler);
+		payload.text = transformed.text;
+		payload.fields = $tw.utils.extend({},payload.fields);
+		if(transformed.changed) {
+		// The same fields that prepareImagePayloads stores with the copy
+			payload.fields[util.IMAGE_SRC_HASH_FIELD] = util.hashString(String(tiddler.fields.text || ""));
+			payload.fields[util.IMAGE_CHAIN_HASH_FIELD] = util.hashString(transformed.text);
+			payload.fields.type = transformed.type || tiddler.fields.type;
 		}
+		var parts = store.splitPayload(payload),
+			bytes = 0;
+		parts.forEach(function(part,index) {
+			var operation = {
+				type: "comment",
+				parent_author: "account",
+				parent_permlink: "tw5-root-0000000000000000",
+				author: "account",
+				permlink: "tw5-image-0000000000000000-" + index,
+				title: payload.title,
+				body: "![" + payload.title + "](url)",
+				json_metadata: JSON.stringify({app: "tw5",tw5: part})
+			};
+			bytes += util.getOperationSize(operation);
+		});
+		return {parts: parts.length || 1,bytes: bytes};
 	};
 
 	/*
-Revoke the object url of the preview image when the widget is destroyed
+Estimate the share of the available Hive Power that the given number of
+bytes of operations cost, from the measurement of the last save. Returns
+null when no measurement is known, otherwise an object with the percent
+of the credits that are left and whether it exceeds the limit at which a
+save is stopped
+	*/
+	HiveImagePreviewWidget.prototype.estimateRcShare = function(store,bytes) {
+		var state = store.getRemoteState() || {};
+		if(!state.rcPerByte || !state.rc || !state.rc.current) {
+			return null;
+		}
+		var percent = Math.round(100 * state.rcPerByte * bytes / state.rc.current);
+		return {
+			percent: percent,
+			tooMuch: percent >= 95
+		};
+	};
+
+	/*
+Revoke the object urls of the preview images when the widget is destroyed
 	*/
 	HiveImagePreviewWidget.prototype.onDestroy = function() {
 		this.revokeImage();
