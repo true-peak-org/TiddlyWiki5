@@ -1047,6 +1047,25 @@ the owner. The callback is invoked with (err,operations,mode)
 			entries[title] = entry;
 			entryList.push(entry);
 		});
+		// The resolvers of the bodies must know the targets of the links
+		// and of the embeds of the whole wiki, not only of the tiddlers
+		// of this save: a save that publishes a single tiddler would
+		// otherwise degrade the embeds of the images and the links that
+		// point to the tiddlers that this save does not publish, and a
+		// later save would broadcast the tiddler again because its body
+		// renders differently
+		var resolverEntries = entryList,
+			inEntryList = {};
+		entryList.forEach(function(entry) {
+			inEntryList[entry.title] = true;
+		});
+		if(config.publishFilter) {
+			this.getPublishTitles(config).forEach(function(title) {
+				if(!inEntryList[title]) {
+					resolverEntries.push({title: title,permlink: util.getTiddlerPermlink(wikiId,title)});
+				}
+			});
+		}
 		// The operations for the tiddlers themselves
 		entryList.forEach(function(entry) {
 			var tiddler = self.wiki.getTiddler(entry.title),
@@ -1079,8 +1098,8 @@ the owner. The callback is invoked with (err,operations,mode)
 					body = util.makeTiddlerBody(part,{
 						frontEnd: config.frontEnd,
 						canonicalUrl: canonicalUrl,
-						linkResolver: self.makeLinkResolver(config,entryList,wikiId),
-						imageResolver: self.makeImageResolver(entryList),
+						linkResolver: self.makeLinkResolver(config,resolverEntries,wikiId),
+						imageResolver: self.makeImageResolver(resolverEntries),
 						tiddler: tiddler
 					});
 				part.bh = util.hashString(body);
