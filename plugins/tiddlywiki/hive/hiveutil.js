@@ -780,10 +780,29 @@ stored on the chain is the copy that a reader of the wiki receives
 	exports.IMAGE_SETTINGS_FIELDS = {
 		"cdn-scale": "1",
 		"cdn-quality": "0.8",
+		"cdn-format": "webp",
 		"chain-scale": "1",
 		"chain-quality": "1",
+		"chain-format": "webp",
 		"chain-external": "",
 		"autoupload": ""
+	};
+
+	/*
+Whether the copy described by the settings needs a transform at all: a
+scale below 100%, a re-encode, or a conversion to webp of an image that
+is not webp already and not an animated gif, which the canvas would
+strip down to its first frame
+*/
+	exports.imageNeedsTransform = function(tiddler,settings) {
+		if(settings.scale > 0 && settings.scale < 1 || settings.quality < 1) {
+			return true;
+		}
+		if(settings.format === "keep") {
+			return false;
+		}
+		var type = tiddler ? tiddler.fields.type : "";
+		return type !== "image/webp" && type !== "image/gif";
 	};
 
 	/*
@@ -803,13 +822,20 @@ the built in defaults
 			}
 			return builtin;
 		}
+		function text(name,builtin) {
+			var raw = fields[name] !== undefined ? fields[name] : defaults[name];
+			raw = String(raw === undefined || raw === null ? "" : raw).trim().toLowerCase();
+			return raw === "keep" ? "keep" : builtin;
+		}
 		// The scale and quality of the copy that is hosted on the image
 		// hoster of the Hive
 		settings.cdn.scale = number("hive-image-cdn-scale",1);
 		settings.cdn.quality = number("hive-image-cdn-quality",0.8);
+		settings.cdn.format = text("hive-image-cdn-format","webp");
 		// The scale and quality of the copy that is stored on the chain
 		settings.chain.scale = number("hive-image-chain-scale",1);
 		settings.chain.quality = number("hive-image-chain-quality",1);
+		settings.chain.format = text("hive-image-chain-format","webp");
 		// When no copy of the image is stored on the chain at all, the
 		// readers of the wiki load it from the image hoster
 		var external = fields["hive-image-chain-external"] !== undefined ? fields["hive-image-chain-external"] : defaults["hive-image-chain-external"];
@@ -895,21 +921,29 @@ the wiki runs in
 	/*
 Scale an image down and re-encode it. The text is the base64 data of the
 tiddler, the type its content type, and the options carry the scale (a
-fraction of the original width and height) and the quality (0..1) of the
-re-encoding. The callback is invoked with (err,result) where the result
-holds the base64 text and the content type of the copy, the size of the
-image and of its data, and a flag that tells whether the data changed at
-all. An image that is not scaled and re-encoded is returned unchanged,
-an animated image is not re-encoded either, because the canvas would
-lose all but the first frame
+fraction of the original width and height), the quality (0..1) of the
+re-encoding and the format of the copy: "webp" (the default) re-encodes
+every image as webp, which is the best compression for the quality that
+the browsers of the readers support, and "keep" re-encodes in the format
+of the image itself. The callback is invoked with (err,result) where the
+result holds the base64 text and the content type of the copy, the size
+of the image and of its data, and a flag that tells whether the data
+changed at all. A copy that would be larger than the image itself is not
+published: the image is kept as it is instead. An image that is neither
+scaled nor re-encoded is returned unchanged, and an animated image is
+not re-encoded either, because the canvas would lose all but the first
+frame
 */
 	exports.transformImage = function(text,type,options,callback) {
 		options = options || {};
 		var scale = options.scale !== undefined ? options.scale : 1,
-			quality = options.quality !== undefined ? options.quality : 1;
+			quality = options.quality !== undefined ? options.quality : 1,
+			// The format of the copy: webp unless the settings of the
+			// copy keep the format of the image
+			format = options.format === "keep" ? null : (options.format === "image/png" ? "image/png" : "image/webp");
 		text = String(text === undefined || text === null ? "" : text);
-		if((scale >= 1 || scale <= 0) && quality >= 1) {
-		// Nothing to scale or re-encode
+		if((scale >= 1 || scale <= 0) && quality >= 1 && (!format || format === type)) {
+		// Nothing to scale, re-encode or convert
 			return callback(null,{text: text,type: type,changed: false});
 		}
 		var bytes;
@@ -939,10 +973,17 @@ lose all but the first frame
 						return callback("Cannot re-encode the image");
 					}
 					scaled.arrayBuffer().then(function(buffer) {
-						var scaledBytes = new Uint8Array(buffer);
-						// The browser encodes into the format that it
-						// supports: webp when it can, png otherwise
-						var scaledType = scaled.type || type;
+						var scaledBytes = new Uint8Array(buffer),
+							scaledType = scaled.type || type;
+						// A browser that cannot encode the requested
+						// format falls back to png silently; the copy is
+						// only published when it is not larger than the
+						// image itself, so that a browser without a webp
+						// encoder keeps the image as it is instead of
+						// blowing it up as png
+						if(scaledBytes.length >= bytes.length && (scale >= 1 || scale <= 0)) {
+							return callback(null,{text: text,type: type,changed: false,width: source.width,height: source.height});
+						}
 						callback(null,{
 							text: exports.encodeBase64(scaledBytes),
 							type: scaledType,
@@ -954,7 +995,7 @@ lose all but the first frame
 					},function(err) {
 						callback("Cannot read the re-encoded image: " + err.message);
 					});
-				},type,quality);
+				},format || type,quality);
 			} catch(e) {
 				callback("Cannot scale the image: " + e.message);
 			}

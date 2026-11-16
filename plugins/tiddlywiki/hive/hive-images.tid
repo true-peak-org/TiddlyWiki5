@@ -3,9 +3,11 @@ caption: Hive images
 
 This manager shows every image tiddler of the wiki and the copies that a save to Hive publishes. The ''hosted'' copy is uploaded to the image hoster of Hive and keeps the wiki light: the tiddler and the bodies that reference it store the url of the copy only. The ''on-chain'' copy is stored inside the replies of the wiki as base64 data and costs Hive Power (resource credits) to publish. A scaled or re-encoded copy is smaller and costs less, and with ''external only'' the hosted copy replaces it entirely.
 
-Each preview shows the original next to the copy, and the sizes are known ''before'' anything is uploaded: the upload to the image hoster, and for the on-chain copy the number of parts that are posted and the share of the available Hive Power that they are estimated to cost. The share is read live from the Hive api with the price curve of the chain, so it works before the first save of this app; until the api answers, a save that was measured before gives the estimate instead. If a copy would use most of the remaining credits, the preview says so and the save would be stopped: scale it down first.
+The ''source'' of an image is the data that the tiddler holds. When you add an image, the source is the original; once the wiki has been reloaded from the chain, the source is the copy that is published there, and the previews name it so. Neither copy is the source of the other automatically: to publish the data you have now as the hosted copy, use ''Upload''; to make a hosted copy that exists somewhere else the source of this image, use ''Fetch hosted copy''. A new on-chain copy is made from whatever the source is by changing the on-chain settings below and saving.
 
-The settings of one image override the defaults in the control panel. A save uploads the hosted copies of the images that have ''upload on save'' ticked; the ''Upload'' button of an image uploads it immediately.
+Each preview shows the source next to the copy, and the sizes are known ''before'' anything is uploaded: the upload to the image hoster, and for the on-chain copy the number of parts that are posted and the share of the available Hive Power that they are estimated to cost. The share is read live from the Hive api with the price curve of the chain, so it works before the first save of this app; until the api answers, a save that was measured before gives the estimate instead. If a copy would use most of the remaining credits, the preview says so and the save would be stopped: scale it down first. Click a preview image to see it fullscreen.
+
+Copies are re-encoded as ''webp'' by default, which compresses best at the quality that browsers support widely. A copy that would come out larger than the source is not published: the source is kept as it is instead. The format of a copy can be kept as the format of the source. The settings of one image override the defaults in the control panel. A save uploads the hosted copies of the images that have ''upload on save'' ticked; the ''Upload'' button of an image uploads it immediately. When an image shrinks so that its on-chain copy needs fewer replies than before, the parts that are left over are marked as removed on the chain.
 
 <$list filter="[type[image/jpeg]] [type[image/png]] [type[image/gif]] [type[image/webp]] [type[image/svg+xml]] +[sort[title]]" variable="imgTitle">
 
@@ -14,17 +16,17 @@ The settings of one image override the defaults in the control panel. A save upl
 |<$hive-imagepreview title=<<imgTitle>> dest="cdn"/> |<$hive-imagepreview title=<<imgTitle>> dest="chain"/> |
 |!Hosted (images.hive.blog) |!On-chain (in the replies) |
 
-;Hosted copy scale and quality
-<$select tiddler=<<imgTitle>> field="hive-image-cdn-scale" default="1"><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></$select> <$select tiddler=<<imgTitle>> field="hive-image-cdn-quality" default="0.8"><option value="1">100%</option><option value="0.8">80%</option><option value="0.6">60%</option><option value="0.4">40%</option></$select>
+;Hosted copy
+<$select tiddler=<<imgTitle>> field="hive-image-cdn-scale" default="1"><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></$select> <$select tiddler=<<imgTitle>> field="hive-image-cdn-quality" default="0.8"><option value="1">100%</option><option value="0.8">80%</option><option value="0.6">60%</option><option value="0.4">40%</option></$select> <$select tiddler=<<imgTitle>> field="hive-image-cdn-format" default="webp"><option value="webp">webp</option><option value="keep">keep format</option></$select>
 
-;On-chain copy scale and quality
-<$select tiddler=<<imgTitle>> field="hive-image-chain-scale" default="1"><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></$select> <$select tiddler=<<imgTitle>> field="hive-image-chain-quality" default="1"><option value="1">100%</option><option value="0.8">80%</option><option value="0.6">60%</option><option value="0.4">40%</option></$select>
+;On-chain copy
+<$select tiddler=<<imgTitle>> field="hive-image-chain-scale" default="1"><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></$select> <$select tiddler=<<imgTitle>> field="hive-image-chain-quality" default="1"><option value="1">100%</option><option value="0.8">80%</option><option value="0.6">60%</option><option value="0.4">40%</option></$select> <$select tiddler=<<imgTitle>> field="hive-image-chain-format" default="webp"><option value="webp">webp</option><option value="keep">keep format</option></$select>
 
 <$checkbox tiddler=<<imgTitle>> field="hive-image-chain-external">External only, no copy on the chain</$checkbox>
 
 <$checkbox tiddler=<<imgTitle>> field="hive-image-autoupload">Upload the hosted copy on save</$checkbox>
 
-<$button><$action-hiveuploadimage title=<<imgTitle>>/>Upload</$button>
+<$button><$action-hiveuploadimage title=<<imgTitle>>/>Upload</$button> <$button><$action-hivefetchimage title=<<imgTitle>>/>Fetch hosted copy as source</$button>
 
 Hosted url: <$view tiddler=<<imgTitle>> field="hive-image-url"/>
 

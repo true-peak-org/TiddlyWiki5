@@ -4,12 +4,20 @@ type: application/javascript
 module-type: widget
 
 Preview widget for the copies of an image that a save to Hive publishes.
-It shows the original image next to the copy that results from the image
-settings of the tiddler, so that the loss of quality can be judged, and it
-shows how large the copy is before anything is uploaded: the size of the
-upload to the image hoster of Hive, and for the on-chain copy the number
-of parts that are posted and the share of the Hive Power (resource
-credits) that the copy is estimated to cost.
+It shows the source of the image next to the copy that results from the
+image settings of the tiddler, so that the loss of quality can be judged,
+and it shows how large the copy is before anything is uploaded: the size
+of the upload to the image hoster of Hive, and for the on-chain copy the
+number of parts that are posted and the share of the Hive Power (resource
+credits) that the copy is estimated to cost. Clicking a preview image
+opens it fullscreen, so that the difference between the copies can be
+examined closely.
+
+The source is the image data that the tiddler holds: when the image was
+added to the wiki, the source is the original, and once the wiki has been
+reloaded from the chain, the source is the copy that is published there.
+A copy is never the source of the other automatically, the image manager
+has actions to adopt the hosted copy as the source.
 
 Usage:
 
@@ -97,18 +105,23 @@ Render the container of the preview and start the computation of the copy
 
 	/*
 Create one thumbnail with a caption below it and append it to the row of
-thumbnails. Returns the img element
+thumbnails. The image opens fullscreen when it is clicked. Returns the
+img element
 	*/
 	HiveImagePreviewWidget.prototype.addThumbnail = function(objectUrl,caption,captionClass) {
-		var thumb = this.document.createElement("span"),
+		var self = this,
+			thumb = this.document.createElement("span"),
 			image = this.document.createElement("img"),
 			label = this.document.createElement("span");
 		thumb.style.cssText = "display:inline-block;";
 		image.className = "hive-imagepreview-image";
 		image.title = this.previewTitle;
 		image.alt = caption;
-		image.style.cssText = "max-width:" + this.previewSize + "px;max-height:" + this.previewSize + "px;display:block;margin:0 auto;border:1px solid #ccc;background:#fafafa;";
+		image.style.cssText = "max-width:" + this.previewSize + "px;max-height:" + this.previewSize + "px;display:block;margin:0 auto;border:1px solid #ccc;background:#fafafa;cursor:zoom-in;";
 		image.src = objectUrl;
+		image.addEventListener("click",function() {
+			self.openLightbox(objectUrl);
+		});
 		label.className = captionClass || "hive-imagepreview-caption";
 		label.style.cssText = "display:block;font-size:0.8em;color:#666;margin-top:0.2em;";
 		label.textContent = caption;
@@ -116,6 +129,49 @@ thumbnails. Returns the img element
 		thumb.appendChild(label);
 		this.thumbsNode.appendChild(thumb);
 		return image;
+	};
+
+	/*
+Show an image fullscreen until it is clicked again or Escape is pressed
+	*/
+	HiveImagePreviewWidget.prototype.openLightbox = function(objectUrl) {
+		var self = this,
+			doc = this.document;
+		this.closeLightbox();
+		var overlay = doc.createElement("div"),
+			image = doc.createElement("img");
+		overlay.className = "hive-imagepreview-lightbox";
+		overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center;cursor:zoom-out;";
+		image.src = objectUrl;
+		image.style.cssText = "max-width:92vw;max-height:92vh;background:transparent;";
+		overlay.appendChild(image);
+		var close = function() {
+			self.closeLightbox();
+		};
+		var onKey = function(event) {
+			if(event.key === "Escape") {
+				close();
+			}
+		};
+		overlay.addEventListener("click",close);
+		doc.addEventListener("keydown",onKey,true);
+		doc.body.appendChild(overlay);
+		this.lightboxNode = overlay;
+		this.lightboxKeyHandler = onKey;
+	};
+
+	/*
+Close the fullscreen view of a preview image
+	*/
+	HiveImagePreviewWidget.prototype.closeLightbox = function() {
+		if(this.lightboxKeyHandler) {
+			this.document.removeEventListener("keydown",this.lightboxKeyHandler,true);
+			this.lightboxKeyHandler = null;
+		}
+		if(this.lightboxNode && this.lightboxNode.parentNode) {
+			this.lightboxNode.parentNode.removeChild(this.lightboxNode);
+		}
+		this.lightboxNode = null;
 	};
 
 	/*
@@ -182,11 +238,17 @@ thumbnails and the information line
 			return info(url ? (title + ": hosted copy only, the " + this.previewDest + " copy is empty") : (title + ": no image data"));
 		}
 		// The original is always shown, so that the copy can be compared
-		// with it
+		// with it. The source of the image is named after what it holds:
+		// the copy that is published on the chain, or just the data that
+		// the tiddler was added with
 		var originalUrl = this.makeObjectUrl(text,type),
-			originalChars = text.length;
+			originalChars = text.length,
+			sourceCaption = "source";
+		if(tiddler.fields[util.IMAGE_CHAIN_HASH_FIELD] && tiddler.fields[util.IMAGE_CHAIN_HASH_FIELD] === util.hashString(text)) {
+			sourceCaption = "source (the on-chain copy)";
+		}
 		if(originalUrl) {
-			this.addThumbnail(originalUrl,"original");
+			this.addThumbnail(originalUrl,sourceCaption);
 		}
 		var settings = util.getImageSettings(tiddler,store.getImageDefaults()),
 			options = this.previewDest === "chain" ? settings.chain : settings.cdn,
@@ -204,7 +266,7 @@ thumbnails and the information line
 					return (chars * 0.75 / 1024).toFixed(chars * 0.75 >= 102400 ? 0 : 1);
 				},
 				saved = originalChars > 0 ? Math.round(100 * (1 - transformed.text.length / originalChars)) : 0,
-				comparison = transformed.changed ? ", " + (saved > 0 ? "\u2212" + saved + "%" : "+" + (-saved) + "%") + " (" + kB(originalChars) + " kB original)" : "",
+				comparison = transformed.changed ? ", " + (saved > 0 ? "\u2212" + saved + "%" : "+" + (-saved) + "%") + " (" + kB(originalChars) + " kB source)" : "",
 				// The bytes of the operations are counted directly, unlike
 				// the base64 characters of the image data
 				kBp = function(bytes) {
@@ -353,9 +415,11 @@ save is stopped
 	};
 
 	/*
-Revoke the object urls of the preview images when the widget is destroyed
+Revoke the object urls of the preview images and close the fullscreen
+view when the widget is destroyed
 	*/
 	HiveImagePreviewWidget.prototype.onDestroy = function() {
+		this.closeLightbox();
 		this.revokeImage();
 	};
 

@@ -10,6 +10,7 @@ Usage:
 	<$button><$action-hivesave/>Save to Hive</$button>
 	<$button><$action-hiveload permlink="tw5-..."/>Load from Hive</$button>
 	<$button><$action-hiveuploadimage title="My image.webp"/>Upload</$button>
+	<$button><$action-hivefetchimage title="My image.webp"/>Fetch hosted copy</$button>
 
 \*/
 (function(){
@@ -189,6 +190,19 @@ Invoke the action associated with this widget
 					("The image " + self.imageTitle + " is hosted already at " + result.url) :
 					("The image " + self.imageTitle + " is hosted at " + result.url));
 			});
+		} else if(this.action === "fetchimage") {
+		// Fetch the hosted copy of an image from the image hoster and
+		// make it the source of the tiddler, so that a new on-chain copy
+		// or a new upload can be made from it
+			store.fetchImage(config,this.imageTitle,function(err,result) {
+				if(err) {
+					$tw.utils.error("Hive: " + err);
+					return;
+				}
+				if(result) {
+					store.setStatus("The hosted copy of " + self.imageTitle + " is the source of the image now (" + Math.round(result.bytes / 1024) + " kB)");
+				}
+			});
 		} else if(this.action === "inspect") {
 			// Prepare the operations of a save and show them in a preview
 			// tiddler, without broadcasting anything
@@ -273,5 +287,6 @@ be sent to Keychain for signing
 	exports["action-hiveapprove"] = HiveActionWidget;
 	exports["action-hiveproposal"] = HiveActionWidget;
 	exports["action-hiveuploadimage"] = HiveActionWidget;
+	exports["action-hivefetchimage"] = HiveActionWidget;
 
 })();

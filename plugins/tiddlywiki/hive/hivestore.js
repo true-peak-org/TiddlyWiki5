@@ -645,8 +645,10 @@ Return the default image settings of the wiki, from the config tiddlers
 		return {
 			"hive-image-cdn-scale": this.getConfigText("image/cdn-scale",""),
 			"hive-image-cdn-quality": this.getConfigText("image/cdn-quality",""),
+			"hive-image-cdn-format": this.getConfigText("image/cdn-format",""),
 			"hive-image-chain-scale": this.getConfigText("image/chain-scale",""),
 			"hive-image-chain-quality": this.getConfigText("image/chain-quality",""),
+			"hive-image-chain-format": this.getConfigText("image/chain-format",""),
 			"hive-image-chain-external": this.getConfigText("image/chain-external",""),
 			"hive-image-autoupload": this.getConfigText("image/autoupload","")
 		};
@@ -682,7 +684,7 @@ transformed copy is not transformed again. The callback is invoked with
 				var payload = util.getTiddlerPayload(tiddler);
 				payload.text = "";
 				self._imagePayloads[title] = payload;
-			} else if(settings.chain.scale < 1 && settings.chain.scale > 0 || settings.chain.quality < 1) {
+			} else if(util.imageNeedsTransform(tiddler,settings.chain)) {
 				pending.push({title: title,tiddler: tiddler,settings: settings});
 			}
 		});
@@ -703,7 +705,7 @@ transformed copy is not transformed again. The callback is invoked with
 			// chain, for example because it was loaded from the chain
 				return next();
 			}
-			util.transformImage(text,tiddler.fields.type,{scale: item.settings.chain.scale,quality: item.settings.chain.quality},function(err,transformed) {
+			util.transformImage(text,tiddler.fields.type,{scale: item.settings.chain.scale,quality: item.settings.chain.quality,format: item.settings.chain.format},function(err,transformed) {
 				if(err) {
 					return callback("Cannot prepare the image " + item.title + " for the Hive: " + err);
 				}
@@ -752,7 +754,7 @@ skipped. The callback is invoked with (err,result)
 		this.setStatus("Preparing the hosted copy of the image " + title + " ...");
 		var host = String(this.getConfigText("image-host","https://images.hive.blog") || "https://images.hive.blog").trim().replace(/\/$/,"");
 		var original = {text: String(tiddler.fields.text || ""),type: tiddler.fields.type};
-		util.transformImage(original.text,original.type,{scale: settings.cdn.scale,quality: settings.cdn.quality},function(err,transformed) {
+		util.transformImage(original.text,original.type,{scale: settings.cdn.scale,quality: settings.cdn.quality,format: settings.cdn.format},function(err,transformed) {
 			var text = original.text,
 				type = original.type;
 			if(err) {
@@ -819,6 +821,61 @@ skipped. The callback is invoked with (err,result)
 					});
 				});
 			});
+		});
+	};
+
+	/*
+Fetch the hosted copy of an image from the image hoster and make it the
+source of the tiddler: the data of the hosted copy is stored in the
+tiddler as its image, so that a hosted copy that a user has somewhere
+else can become the copy of this wiki, and a new on-chain copy or a new
+upload can be made from it. The url of the hosted copy is kept, the
+hashes of the copies of the tiddler are dropped, so that the next save
+transforms and publishes the adopted data anew. The callback is invoked
+with (err,result)
+*/
+	HiveStore.prototype.fetchImage = function(config,title,callback) {
+		var self = this,
+			tiddler = this.wiki.getTiddler(title);
+		if(!tiddler) {
+			return callback("There is no tiddler " + title);
+		}
+		if(!util.isImageTiddler(tiddler)) {
+			return callback("The tiddler " + title + " is not an image");
+		}
+		var url = tiddler.fields[util.IMAGE_URL_FIELD] || tiddler.fields._canonical_uri;
+		if(!url) {
+			return callback("The image " + title + " has no hosted copy to fetch: upload it first");
+		}
+		this.setStatus("Fetching the hosted copy of the image " + title + " ...");
+		fetch(url).then(function(response) {
+			if(!response.ok) {
+				throw new Error("the image hoster answered with the status " + response.status);
+			}
+			return response.blob().then(function(blob) {
+				var type = response.headers.get("content-type");
+				if(!type || type === "application/octet-stream" || type === "text/html") {
+					type = blob.type || tiddler.fields.type;
+				}
+				return blob.arrayBuffer().then(function(buffer) {
+					return {type: type.split(";")[0],bytes: new Uint8Array(buffer)};
+				});
+			});
+		}).then(function(image) {
+			var text = util.encodeBase64(image.bytes);
+			if(!util.isImageTiddler({fields: {type: image.type}})) {
+				throw new Error("the hosted copy is not an image of a supported type (" + image.type + ")");
+			}
+			self.wiki.addTiddler(new $tw.Tiddler(tiddler,{
+				title: title,
+				text: text,
+				type: image.type
+			}));
+			self.setStatus("The hosted copy of " + title + " is the source of the image now (" + Math.round(image.bytes.length / 1024) + " kB)");
+			callback(null,{bytes: image.bytes.length,type: image.type});
+		}).catch(function(err) {
+			self.setStatus("Error: cannot fetch the hosted copy of " + title + ": " + err.message);
+			callback("Cannot fetch the hosted copy of " + title + " from " + url + ": " + err.message);
 		});
 	};
 
@@ -1059,17 +1116,24 @@ the owner. The callback is invoked with (err,operations,mode)
 				}
 			});
 		});
-		// The operations for the tiddlers that have been deleted. A non
-		// owner cannot delete the tiddlers of a wiki, the owner has to do
-		// that
+		// The operations for the tiddlers that have been deleted or whose
+		// copies have fewer parts than before. A non owner cannot delete
+		// the tiddlers of a wiki, the owner has to do that
 		if(!propose) {
 			Object.keys(existing).forEach(function(permlink) {
 				var metadata = self.getTw5Metadata(existing[permlink]);
 				if(!util.isTiddlerMetadata(metadata)) {
 					return;
 				}
-				if(index[metadata.title]) {
-					return;
+				var entry = index[metadata.title];
+				if(entry) {
+				// The tiddler is still published. A part beyond the parts
+				// that are published now is left over, for example when
+				// the copy of an image has been scaled down: it is
+				// removed like a deleted tiddler
+					if(!(metadata.part && entry.parts && metadata.part > entry.parts)) {
+						return;
+					}
 				}
 				operations.push({
 					type: "comment",
@@ -1078,7 +1142,10 @@ the owner. The callback is invoked with (err,operations,mode)
 					author: config.account,
 					permlink: permlink,
 					title: util.makeTitle(metadata.title + " (removed)"),
-					body: "> **Note:** This tiddler has been removed from the wiki that this post belongs to.",
+					// An empty body marks the post as a soft delete in
+					// many frontends of the Hive, and the wiki itself
+					// recognizes the removal by the metadata
+					body: "",
 					json_metadata: JSON.stringify({app: "tw5",canonical_url: self.makeCanonicalUrl(config,rootPermlink,metadata.title),tw5: {
 						type: "tiddler",
 						title: metadata.title,
