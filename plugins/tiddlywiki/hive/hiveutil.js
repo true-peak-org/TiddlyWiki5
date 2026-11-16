@@ -686,12 +686,13 @@ json_metadata of the post
 			// originated content such as comments and proposals is usually
 			// authored in markdown already
 			markdown = exports.isMarkdown(payload.text) ? String(payload.text || "") : exports.wikitextToMarkdown(payload.text,options.linkResolver,options.imageResolver);
-		} else if(options.tiddler && options.tiddler.fields[exports.IMAGE_URL_FIELD]) {
-			// The body of an image that is hosted on the image hoster of
-			// the Hive shows the hosted image, so that the post is readable
-			// on the front-ends of the Hive
-			markdown = "![" + exports.plainText(payload.title) + "](" + options.tiddler.fields[exports.IMAGE_URL_FIELD] + ")";
 		}
+		// The body of an image stays free of the hosted image: the url of
+		// the hosted copy is kept with the metadata of the post, and the
+		// readers of the wiki load the image from there. A body that does
+		// not depend on the hosted copy also does not change when the
+		// image is uploaded or its hosted settings change, so that the
+		// copy on the chain is not broadcast again for it
 		markdown = exports.expandHiveLinks(markdown,options.frontEnd);
 		lines.push("> **Note:** This post is part of a wiki published from [TiddlyWiki5](https://tiddlywiki.com).");
 		lines.push("> The canonical text of the tiddler is stored in the `tw5` metadata of this post, and the");
