@@ -133,6 +133,17 @@ either stored explicitly or are local bookkeeping
 	var EXCLUDED_FIELDS = ["title","text","tags","created","modified","creator","modifier","revision","draft.of","draft.title"];
 
 	/*
+Fields of an image tiddler that configure the copies of the image and are
+not published: the scale, the quality and the format of the copies, whether
+a copy is stored on the chain at all and whether it is uploaded on save,
+and the bookkeeping of the hosted copy. They live in the wiki only, so
+that changing them does not republish an unchanged copy on the chain
+*/
+	var LOCAL_IMAGE_FIELDS = ["hive-image-cdn-scale","hive-image-cdn-quality","hive-image-cdn-format","hive-image-chain-scale","hive-image-chain-quality","hive-image-chain-format","hive-image-chain-external","hive-image-autoupload","hive-image-cdn-hash"];
+
+	exports.LOCAL_IMAGE_FIELDS = LOCAL_IMAGE_FIELDS;
+
+	/*
 Return a 16 character hexadecimal hash of a string. This is not a
 cryptographic hash, it is only used to detect changes and to make permlinks
 unique
@@ -281,9 +292,10 @@ stored in the json_metadata of a Hive reply
 				modified: exports.toTiddlerDate(tiddler.fields.modified)
 			};
 		Object.keys(tiddler.fields).forEach(function(name) {
-			if(EXCLUDED_FIELDS.indexOf(name) === -1) {
-				fields[name] = tiddler.fields[name];
+			if(EXCLUDED_FIELDS.indexOf(name) !== -1 || LOCAL_IMAGE_FIELDS.indexOf(name) !== -1) {
+				return;
 			}
+			fields[name] = tiddler.fields[name];
 		});
 		if(tiddler.fields.tags) {
 			payload.tags = $tw.utils.isArray(tiddler.fields.tags) ? tiddler.fields.tags.slice(0) : [tiddler.fields.tags];

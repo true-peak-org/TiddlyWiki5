@@ -60,6 +60,50 @@ loaded, because a broad publish filter must not broadcast them
 	};
 
 	/*
+Whether the part and the metadata of the reply on the chain hold the same
+content once the fields that are not published are ignored on both sides:
+the settings of an image are not part of the payload (see getTiddlerPayload),
+and the url of the hosted copy is not part of the payload of an image that
+is stored on the chain, where the hosted copy exists in addition to the
+copy of the chain. The dates are the dates of the reply on both sides,
+because they are not part of the published content either. This catches a
+copy that was published by an earlier version of the app, whose payload
+still carried the settings of the image
+*/
+	var contentIsSame = function(part,remoteMetadata) {
+		var ignore = util.LOCAL_IMAGE_FIELDS.slice();
+		if(String(part.text || "")) {
+		// A copy on the chain is not about the hosted copy: its url is
+		// ignored. An image that is not stored on the chain keeps the url
+		// of its hosted copy, from which the readers load the image
+			ignore.push(util.IMAGE_URL_FIELD);
+		}
+		function normalize(fields) {
+			var result = {};
+			Object.keys(fields || {}).forEach(function(name) {
+				if(ignore.indexOf(name) === -1) {
+					result[name] = fields[name];
+				}
+			});
+			return result;
+		}
+		function side(title,text,fields,tags,part,parts,created,modified) {
+			return util.canonicalJSON({
+				title: title,
+				text: String(text || ""),
+				fields: normalize(fields),
+				tags: tags || [],
+				part: part || 1,
+				parts: parts || 1,
+				created: created || "",
+				modified: modified || ""
+			});
+		}
+		return side(part.title,part.text,part.fields,part.tags,part.part,part.parts,remoteMetadata.created,remoteMetadata.modified)
+			=== side(remoteMetadata.title,remoteMetadata.text,remoteMetadata.fields,remoteMetadata.tags,remoteMetadata.part,remoteMetadata.parts,remoteMetadata.created,remoteMetadata.modified);
+	};
+
+	/*
 Construct a store
 */
 	function HiveStore(options) {
@@ -1282,7 +1326,11 @@ Hive post - the hash is also compared against the dates that the reply on
 the chain carries. The body is compared by its own hash, so that a body
 that the current version of the app would render differently, for example
 with the tiddler links resolved, is broadcast again even when the content
-of the tiddler is unchanged
+of the tiddler is unchanged. As a last resort the content is compared
+structurally with the fields that are not published ignored on both
+sides, so that a copy on the chain that was published by an earlier
+version of the app, which still carried the settings of an image in the
+payload, matches without being broadcast again
 */
 	HiveStore.prototype.isReplyUpToDate = function(part,bodyHash,remoteMetadata) {
 		if(remoteMetadata.bh !== bodyHash) {
@@ -1305,7 +1353,10 @@ of the tiddler is unchanged
 		});
 		withDates.created = remoteMetadata.created || "";
 		withDates.modified = remoteMetadata.modified || "";
-		return remoteMetadata.hash === util.getPayloadHash(withDates);
+		if(remoteMetadata.hash === util.getPayloadHash(withDates)) {
+			return true;
+		}
+		return contentIsSame(part,remoteMetadata);
 	};
 
 	/*
