@@ -805,6 +805,15 @@ stored on the chain is the copy that a reader of the wiki receives
 	};
 
 	/*
+	The body of a reply that marks the copy of a removed tiddler. The
+	chain rejects a comment with an empty body, so the body names the
+	removal; the wiki recognizes the removal by the metadata of the reply.
+	The body is kept as it was written by the earlier versions of the app,
+	so that the tombstones of a wiki are all alike
+	*/
+	exports.TOMBSTONE_BODY = "> **Note:** This tiddler has been removed from the wiki that this post belongs to.";
+
+	/*
 	The title of the tiddler that holds the registry of the hosted copies of
 	the images. The registry is a JSON tiddler whose text is a dictionary
 	that is keyed by the title of an image tiddler, and whose entries hold

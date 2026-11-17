@@ -1298,6 +1298,12 @@ the owner. The callback is invoked with (err,operations,mode)
 				if(!util.isTiddlerMetadata(metadata)) {
 					return;
 				}
+				if(metadata.deleted) {
+				// The reply marks its tiddler as removed already: the removal
+				// is broadcast once, and the reply is not broadcast again on
+				// every save
+					return;
+				}
 				var entry = index[metadata.title];
 				if(entry) {
 				// The tiddler is still published. A part beyond the parts
@@ -1315,10 +1321,10 @@ the owner. The callback is invoked with (err,operations,mode)
 					author: config.account,
 					permlink: permlink,
 					title: util.makeTitle(metadata.title + " (removed)"),
-					// An empty body marks the post as a soft delete in
-					// many frontends of the Hive, and the wiki itself
-					// recognizes the removal by the metadata
-					body: "",
+					// The chain rejects a comment with an empty body, so the
+					// body names the removal, and the wiki itself recognizes
+					// the removal by the metadata
+					body: util.TOMBSTONE_BODY,
 					json_metadata: JSON.stringify({app: "tw5",canonical_url: self.makeCanonicalUrl(config,rootPermlink,metadata.title),tw5: {
 						type: "tiddler",
 						title: metadata.title,
