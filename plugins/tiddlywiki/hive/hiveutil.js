@@ -674,14 +674,17 @@ json_metadata of the post
 		options = options || {};
 		var lines = [],
 			markdown = "",
-			binary = false;
+			bodyFree = false;
 		if(options.tiddler) {
 			// Binary tiddlers such as images keep their data in the metadata of
-			// the post, the body of the post stays free of the encoded data
+			// the post, the body of the post stays free of the encoded data.
+			// The registry of the hosted copies of the images is a JSON tiddler
+			// that is only read by the plugin: like the data of an image, its
+			// text is kept in the metadata of the post
 			var contentTypeInfo = $tw.config.contentTypeInfo[options.tiddler.fields.type || "text/vnd.tiddlywiki"];
-			binary = !!(contentTypeInfo && contentTypeInfo.encoding === "base64");
+			bodyFree = !!(contentTypeInfo && contentTypeInfo.encoding === "base64") || options.tiddler.fields.title === exports.IMAGE_REGISTRY_TITLE;
 		}
-		if(!binary) {
+		if(!bodyFree) {
 			// TiddlyWiki originated content is converted into markdown, hive
 			// originated content such as comments and proposals is usually
 			// authored in markdown already
@@ -799,6 +802,141 @@ stored on the chain is the copy that a reader of the wiki receives
 		"chain-format": "webp",
 		"chain-external": "",
 		"autoupload": ""
+	};
+
+	/*
+	The title of the tiddler that holds the registry of the hosted copies of
+	the images. The registry is a JSON tiddler whose text is a dictionary
+	that is keyed by the title of an image tiddler, and whose entries hold
+	the url and the hash of the hosted copy of the image and a snapshot of
+	the fields of the tiddler that configure it. The registry is published
+	with the wiki, so that a wiki that is loaded on another device restores
+	the urls and the settings of the images, which the copies of the images
+	on the chain do not carry
+	*/
+	exports.IMAGE_REGISTRY_TITLE = "$:/hive/image-registry";
+
+	/*
+	The fields of an image tiddler that a snapshot in the registry of the
+	hosted copies holds: the settings of the image. The hash of the hosted
+	copy is not part of the snapshot, it is the hash of the entry, and the
+	url of the hosted copy is the url of the entry
+	*/
+	exports.IMAGE_REGISTRY_SNAPSHOT_FIELDS = LOCAL_IMAGE_FIELDS.filter(function(name) {
+		return name !== "hive-image-cdn-hash";
+	});
+
+	/*
+	Return the entries of the registry of the hosted copies from its text,
+	a dictionary that is keyed by the title of an image tiddler. An invalid
+	text yields an empty dictionary, an entry that is not sane is dropped:
+	an entry holds the url and the hash of the hosted copy as strings and
+	the snapshot of the settings as a dictionary of strings
+	*/
+	exports.getImageRegistryEntries = function(text) {
+		var entries = {},
+			json;
+		try {
+			json = JSON.parse(String(text || "") || "{}");
+		} catch(err) {
+			return entries;
+		}
+		if(!json || typeof json !== "object" || $tw.utils.isArray(json)) {
+			return entries;
+		}
+		Object.keys(json).forEach(function(title) {
+			var value = json[title],
+				entry = {};
+			if(!value || typeof value !== "object" || $tw.utils.isArray(value)) {
+				return;
+			}
+			if(typeof value.url === "string" && value.url) {
+				entry.url = value.url;
+			}
+			if(typeof value.hash === "string" && value.hash) {
+				entry.hash = value.hash;
+			}
+			if(value.fields && typeof value.fields === "object" && !$tw.utils.isArray(value.fields)) {
+				var fields = {};
+				Object.keys(value.fields).forEach(function(name) {
+					if(typeof value.fields[name] === "string") {
+						fields[name] = value.fields[name];
+					}
+				});
+				if(Object.keys(fields).length) {
+					entry.fields = fields;
+				}
+			}
+			if(Object.keys(entry).length) {
+				entries[title] = entry;
+			}
+		});
+		return entries;
+	};
+
+	/*
+	Return the text of the registry of the hosted copies for the given
+	entries, stable so that an unchanged registry is not published again
+	*/
+	exports.makeImageRegistryText = function(entries) {
+		return exports.canonicalJSON(entries || {});
+	};
+
+	/*
+	Return the entry of an image tiddler for the registry of the hosted
+	copies: the url and the hash of the hosted copy, which the fields of
+	the tiddler hold, and a snapshot of the settings of the image. The
+	values of an entry that exists already are kept when the tiddler does
+	not carry them, so that an entry that was loaded from the registry
+	survives the sync. An entry without content yields null
+	*/
+	exports.makeImageRegistryEntry = function(tiddler,existing) {
+		var entry = {},
+			url = tiddler.fields[exports.IMAGE_URL_FIELD] || (existing && existing.url),
+			hash = tiddler.fields[exports.IMAGE_CDN_HASH_FIELD] || (existing && existing.hash);
+		if(url) {
+			entry.url = String(url);
+		}
+		if(hash) {
+			entry.hash = String(hash);
+			if(!entry.url && existing && existing.url) {
+				entry.url = existing.url;
+			}
+		}
+		var fields = {};
+		exports.IMAGE_REGISTRY_SNAPSHOT_FIELDS.forEach(function(name) {
+			if(tiddler.fields[name] !== undefined) {
+				fields[name] = String(tiddler.fields[name]);
+			}
+		});
+		if(Object.keys(fields).length) {
+			entry.fields = fields;
+		}
+		return Object.keys(entry).length ? entry : null;
+	};
+
+	/*
+	Return the fields that an image tiddler is missing and that an entry of
+	the registry of the hosted copies holds: the url and the hash of the
+	hosted copy and the settings of the image. Fields that the tiddler
+	carries are never changed, so that the settings of the wiki of the user
+	are not overwritten by the registry. Fields that are not missing yield
+	null
+	*/
+	exports.getImageRegistryHydration = function(entry,tiddler) {
+		var fields = {};
+		if(entry.url && tiddler.fields[exports.IMAGE_URL_FIELD] === undefined) {
+			fields[exports.IMAGE_URL_FIELD] = entry.url;
+		}
+		if(entry.hash && tiddler.fields[exports.IMAGE_CDN_HASH_FIELD] === undefined) {
+			fields[exports.IMAGE_CDN_HASH_FIELD] = entry.hash;
+		}
+		Object.keys(entry.fields || {}).forEach(function(name) {
+			if(tiddler.fields[name] === undefined) {
+				fields[name] = entry.fields[name];
+			}
+		});
+		return Object.keys(fields).length ? fields : null;
 	};
 
 	/*

@@ -354,15 +354,24 @@ carry the tag of the proposals or of the replies - are never published,
 whatever the publish filter is
 */
 	HiveStore.prototype.getPublishTitles = function(config) {
-		var self = this;
-		return this.wiki.filterTiddlers(config.publishFilter).filter(function(title) {
-			if(isManagedTitle(title)) {
-				return false;
-			}
-			var tiddler = self.wiki.getTiddler(title),
-				tags = tiddler && $tw.utils.isArray(tiddler.fields.tags) ? tiddler.fields.tags : [];
-			return tags.indexOf(util.COMMENT_TAG) === -1 && tags.indexOf(util.REPLY_TAG) === -1;
-		});
+		var self = this,
+			titles = this.wiki.filterTiddlers(config.publishFilter).filter(function(title) {
+				if(isManagedTitle(title)) {
+					return false;
+				}
+				var tiddler = self.wiki.getTiddler(title),
+					tags = tiddler && $tw.utils.isArray(tiddler.fields.tags) ? tiddler.fields.tags : [];
+				return tags.indexOf(util.COMMENT_TAG) === -1 && tags.indexOf(util.REPLY_TAG) === -1;
+			});
+		// The registry of the hosted copies of the images is a system tiddler
+		// that the publish filter does not match. It is published with the
+		// wiki when it exists, so that the urls and the settings of the
+		// images are portable: a wiki that is loaded on another device
+		// restores them from the registry
+		if(this.wiki.getTiddler(util.IMAGE_REGISTRY_TITLE) && titles.indexOf(util.IMAGE_REGISTRY_TITLE) === -1) {
+			titles.push(util.IMAGE_REGISTRY_TITLE);
+		}
+		return titles;
 	};
 
 	/*
@@ -517,6 +526,14 @@ them
 						if(err) {
 							self.setStatus("");
 							return callback(err);
+						}
+						// The upload of the images and the sync of the payloads
+						// may have created or updated the registry of the hosted
+						// copies of the images, and the list of the titles was
+						// read before the uploads: the registry is published
+						// with this save
+						if(self.wiki.getTiddler(util.IMAGE_REGISTRY_TITLE) && titles.indexOf(util.IMAGE_REGISTRY_TITLE) === -1) {
+							titles.push(util.IMAGE_REGISTRY_TITLE);
 						}
 						self.buildOperations(config,effectiveOwner,wikiId,wikiTitle,rootPermlink,rootContent,replies,titles,function(err,operations,mode) {
 							if(err) {
@@ -732,12 +749,62 @@ so that a tiddler that was loaded from the chain and already holds the
 transformed copy is not transformed again. The callback is invoked with
 (err,images) where the images hold the prepared settings of each image
 */
+	/*
+	Synchronize the registry of the hosted copies of the images with the
+	image tiddlers of the wiki. The entry of an image holds the url and the
+	hash of its hosted copy and a snapshot of the settings of the image, so
+	that a wiki that is loaded on another device restores them. The entries
+	of images that do not exist anymore are dropped, and the registry
+	tiddler is written when its content changed
+	*/
+	HiveStore.prototype.syncImageRegistry = function() {
+		var registryTiddler = this.wiki.getTiddler(util.IMAGE_REGISTRY_TITLE),
+			entries = util.getImageRegistryEntries(registryTiddler ? String(registryTiddler.fields.text || "") : ""),
+			changed = false,
+			title,
+			tiddler;
+		for(title in entries) {
+			tiddler = this.wiki.getTiddler(title);
+			if(!tiddler || !util.isImageTiddler(tiddler)) {
+			// The image of the entry does not exist anymore
+				delete entries[title];
+				changed = true;
+			}
+		}
+		this.wiki.forEachTiddler(function(title,tiddler) {
+			if(!util.isImageTiddler(tiddler)) {
+				return;
+			}
+			var entry = util.makeImageRegistryEntry(tiddler,entries[title]);
+			if(entry) {
+				if(!entries[title] || util.canonicalJSON(entries[title]) !== util.canonicalJSON(entry)) {
+					entries[title] = entry;
+					changed = true;
+				}
+			} else if(entries[title]) {
+			// The image carries neither a hosted copy nor settings anymore
+				delete entries[title];
+				changed = true;
+			}
+		});
+		if(changed) {
+			var fields = {title: util.IMAGE_REGISTRY_TITLE,type: "application/json",text: util.makeImageRegistryText(entries)};
+			this.wiki.addTiddler(registryTiddler ? new $tw.Tiddler(registryTiddler,fields) : new $tw.Tiddler(fields));
+		}
+		return changed;
+	};
+
 	HiveStore.prototype.prepareImagePayloads = function(config,titles,callback) {
 		var self = this,
 			defaults = this.getImageDefaults(),
 			images = [],
 			pending = [];
 		this._imagePayloads = {};
+		// The registry of the hosted copies of the images is synchronized
+		// with the image tiddlers before the payloads are built, so that an
+		// image whose settings changed is published together with the
+		// registry that carries its settings
+		this.syncImageRegistry();
 		titles.forEach(function(title) {
 			var tiddler = self.wiki.getTiddler(title);
 			if(!tiddler || !util.isImageTiddler(tiddler)) {
@@ -842,6 +909,19 @@ skipped. The callback is invoked with (err,result)
 			// The same image is hosted already
 				return callback(null,{url: tiddler.fields[util.IMAGE_URL_FIELD],unchanged: true});
 			}
+			// The hosted copy may be known by the registry of the hosted
+			// copies already, for example when this wiki was loaded on
+			// another device and the registry has restored the image without
+			// the fields of its upload
+			var registryTiddler = self.wiki.getTiddler(util.IMAGE_REGISTRY_TITLE),
+				registryEntry = registryTiddler ? util.getImageRegistryEntries(String(registryTiddler.fields.text || ""))[title] : null;
+			if(registryEntry && registryEntry.url && registryEntry.hash === cdnHash) {
+				var hydration = util.getImageRegistryHydration(registryEntry,tiddler);
+				if(hydration) {
+					self.wiki.addTiddler(new $tw.Tiddler(tiddler,hydration));
+				}
+				return callback(null,{url: registryEntry.url,unchanged: true});
+			}
 			util.imageChallengeHash(bytes,function(err,hash) {
 				if(err) {
 					return callback(err);
@@ -882,6 +962,10 @@ skipped. The callback is invoked with (err,result)
 							"hive-image-url": result.url,
 							"hive-image-cdn-hash": cdnHash
 						}));
+						// The registry of the hosted copies records the url and
+						// the hash of the uploaded copy, so that another device
+						// of the wiki restores them from the chain
+						self.syncImageRegistry();
 						self.setStatus("The image " + title + " is hosted at " + result.url);
 						callback(null,{url: result.url,unchanged: false});
 					}).catch(function(err) {
@@ -911,7 +995,9 @@ with (err,result)
 		if(!util.isImageTiddler(tiddler)) {
 			return callback("The tiddler " + title + " is not an image");
 		}
-		var url = tiddler.fields[util.IMAGE_URL_FIELD] || tiddler.fields._canonical_uri;
+		var registryTiddler = this.wiki.getTiddler(util.IMAGE_REGISTRY_TITLE),
+			registryEntry = registryTiddler ? util.getImageRegistryEntries(String(registryTiddler.fields.text || ""))[title] : null,
+			url = tiddler.fields[util.IMAGE_URL_FIELD] || tiddler.fields._canonical_uri || (registryEntry && registryEntry.url);
 		if(!url) {
 			return callback("The image " + title + " has no hosted copy to fetch: upload it first");
 		}
@@ -1252,6 +1338,14 @@ the owner. The callback is invoked with (err,operations,mode)
 			index: []
 		};
 		entryList.forEach(function(entry) {
+			if(entry.title === util.IMAGE_REGISTRY_TITLE) {
+			// The registry of the hosted copies of the images is not a
+			// tiddler that a reader of the wiki displays: the replies of the
+			// root post are loaded completely, so that the registry loads
+			// without an entry of the root post, whose hash does not change
+			// for it
+				return;
+			}
 			root.index.push({
 				title: entry.title,
 				permlink: entry.permlink,
@@ -1348,13 +1442,21 @@ images that are not hosted resolve to null, so that their embeds stay as
 they are
 */
 	HiveStore.prototype.makeImageResolver = function(entries) {
-		var map = {};
+		var self = this,
+			map = {},
+			registryTiddler = this.wiki.getTiddler(util.IMAGE_REGISTRY_TITLE),
+			registryEntries = registryTiddler ? util.getImageRegistryEntries(String(registryTiddler.fields.text || "")) : {};
 		entries.forEach(function(entry) {
-			var tiddler = this.wiki.getTiddler(entry.title);
+			var tiddler = self.wiki.getTiddler(entry.title);
 			if(tiddler && tiddler.fields[util.IMAGE_URL_FIELD]) {
 				map[entry.title] = tiddler.fields[util.IMAGE_URL_FIELD];
+			} else if(registryEntries[entry.title] && registryEntries[entry.title].url) {
+			// The url of the hosted copy is known by the registry of the
+			// hosted copies, for example when the image was uploaded on
+			// another device of the wiki
+				map[entry.title] = registryEntries[entry.title].url;
 			}
-		},this);
+		});
 		return function(target) {
 			return map[target] || null;
 		};
@@ -2310,6 +2412,63 @@ Load the wiki from Hive. The callback is invoked with (err,result)
 	/*
 Add the tiddlers of the replies to the wiki
 */
+	/*
+	Merge a reply that holds the registry of the hosted copies of the
+	images into the wiki. The entries of the chain win, and the entries
+	that the wiki of the user holds and the chain does not carry are kept,
+	so that an upload that has not been saved yet survives a refresh. The
+	registry is not written when the merged entries are the entries that
+	the wiki holds already
+	*/
+	HiveStore.prototype.applyImageRegistryReply = function(text,existing,summary) {
+		var entries = util.getImageRegistryEntries(text),
+			localEntries = existing ? util.getImageRegistryEntries(String(existing.fields.text || "")) : null,
+			title;
+		for(title in localEntries) {
+			if(!entries[title]) {
+				entries[title] = localEntries[title];
+			}
+		}
+		var mergedText = util.makeImageRegistryText(entries);
+		if(existing && mergedText === String(existing.fields.text || "")) {
+		// The registry of the chain does not add or change anything
+			summary.skipped++;
+			return;
+		}
+		var fields = {title: util.IMAGE_REGISTRY_TITLE,type: "application/json",text: mergedText};
+		this.wiki.addTiddler(existing ? new $tw.Tiddler(existing,fields) : new $tw.Tiddler(fields));
+		if(existing) {
+			summary.updated++;
+		} else {
+			summary.added++;
+		}
+	};
+
+	/*
+	Fill the fields that the image tiddlers of the wiki are missing from
+	the registry of the hosted copies: the url and the hash of the hosted
+	copy and the settings of the image. Fields that a tiddler carries are
+	never changed. The number of the images that were changed is returned
+	*/
+	HiveStore.prototype.hydrateImagesFromRegistry = function() {
+		var self = this,
+			registryTiddler = this.wiki.getTiddler(util.IMAGE_REGISTRY_TITLE),
+			entries = registryTiddler ? util.getImageRegistryEntries(String(registryTiddler.fields.text || "")) : {},
+			hydrated = 0;
+		Object.keys(entries).forEach(function(title) {
+			var tiddler = self.wiki.getTiddler(title);
+			if(!tiddler || !util.isImageTiddler(tiddler)) {
+				return;
+			}
+			var fields = util.getImageRegistryHydration(entries[title],tiddler);
+			if(fields) {
+				self.wiki.addTiddler(new $tw.Tiddler(tiddler,fields));
+				hydrated++;
+			}
+		});
+		return hydrated;
+	};
+
 	HiveStore.prototype.applyReplies = function(config,rootMetadata,replies,callback) {
 		var self = this,
 			summary = {added: 0,updated: 0,removed: 0,skipped: 0,comments: 0},
@@ -2376,6 +2535,12 @@ Add the tiddlers of the replies to the wiki
 			}
 			var text = parts.map(function(part) { return part.text || ""; }).join(""),
 				fields = parts[0].fields || {};
+			if(title === util.IMAGE_REGISTRY_TITLE) {
+			// The registry of the hosted copies of the images is merged
+			// instead of replaced, see applyImageRegistryReply
+				self.applyImageRegistryReply(text,existing,summary);
+				return;
+			}
 			if(!text && fields[util.IMAGE_URL_FIELD] && util.isImageTiddler({fields: {type: fields.type}})) {
 			// An image that is not stored on the chain is loaded from the
 			// image hoster of the Hive
@@ -2427,6 +2592,13 @@ Add the tiddlers of the replies to the wiki
 			}
 			self.wiki.addTiddler(util.payloadToTiddler(payload));
 		});
+		// The registry of the hosted copies of the images fills the fields
+		// that the image tiddlers of this wiki are missing: the url and the
+		// hash of the hosted copy and the settings of the image, which the
+		// copies of the images on the chain do not carry. Only missing
+		// fields are filled, so that the settings of the wiki of the user
+		// are not changed by a refresh
+		summary.hydrated = this.hydrateImagesFromRegistry();
 		// The comments and the proposals are loaded as transient tiddlers
 		// that hold the tiddler that they reply to as a tag, and that hold
 		// a tag that marks them as a proposed change or a comment
