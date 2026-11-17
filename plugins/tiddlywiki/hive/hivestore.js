@@ -70,6 +70,49 @@ because they are not part of the published content either. This catches a
 copy that was published by an earlier version of the app, whose payload
 still carried the settings of the image
 */
+	/*
+	Whether two payload-shaped objects hold the same content once the given
+	fields are ignored on both sides. The objects hold the title, text,
+	fields, tags, part and parts of the content. The dates are compared as
+	they are given, so that a caller can pin the dates of both sides to the
+	same value when the dates are not part of the comparison
+	*/
+	var sameContent = function(left,right,ignoreFields) {
+		function normalize(fields) {
+			var result = {};
+			Object.keys(fields || {}).forEach(function(name) {
+				if(ignoreFields.indexOf(name) === -1) {
+					result[name] = fields[name];
+				}
+			});
+			return result;
+		}
+		function side(o) {
+			return util.canonicalJSON({
+				title: o.title,
+				text: String(o.text || ""),
+				fields: normalize(o.fields),
+				tags: o.tags || [],
+				part: o.part || 1,
+				parts: o.parts || 1,
+				created: o.created || "",
+				modified: o.modified || ""
+			});
+		}
+		return side(left) === side(right);
+	};
+
+	/*
+	Whether the part and the metadata of the reply on the chain hold the same
+	content once the fields that are not published are ignored on both sides:
+	the settings of an image are not part of the payload (see getTiddlerPayload),
+	and the url of the hosted copy is not part of the payload of an image that
+	is stored on the chain, where the hosted copy exists in addition to the
+	copy of the chain. The dates are the dates of the reply on both sides,
+	because they are not part of the published content either. This catches a
+	copy that was published by an earlier version of the app, whose payload
+	still carried the settings of the image
+	*/
 	var contentIsSame = function(part,remoteMetadata) {
 		var ignore = util.LOCAL_IMAGE_FIELDS.slice();
 		if(String(part.text || "")) {
@@ -78,29 +121,10 @@ still carried the settings of the image
 		// of its hosted copy, from which the readers load the image
 			ignore.push(util.IMAGE_URL_FIELD);
 		}
-		function normalize(fields) {
-			var result = {};
-			Object.keys(fields || {}).forEach(function(name) {
-				if(ignore.indexOf(name) === -1) {
-					result[name] = fields[name];
-				}
-			});
-			return result;
-		}
-		function side(title,text,fields,tags,part,parts,created,modified) {
-			return util.canonicalJSON({
-				title: title,
-				text: String(text || ""),
-				fields: normalize(fields),
-				tags: tags || [],
-				part: part || 1,
-				parts: parts || 1,
-				created: created || "",
-				modified: modified || ""
-			});
-		}
-		return side(part.title,part.text,part.fields,part.tags,part.part,part.parts,remoteMetadata.created,remoteMetadata.modified)
-			=== side(remoteMetadata.title,remoteMetadata.text,remoteMetadata.fields,remoteMetadata.tags,remoteMetadata.part,remoteMetadata.parts,remoteMetadata.created,remoteMetadata.modified);
+		return sameContent(
+			{title: part.title,text: part.text,fields: part.fields,tags: part.tags,part: part.part,parts: part.parts,created: remoteMetadata.created,modified: remoteMetadata.modified},
+			{title: remoteMetadata.title,text: remoteMetadata.text,fields: remoteMetadata.fields,tags: remoteMetadata.tags,part: remoteMetadata.part,parts: remoteMetadata.parts,created: remoteMetadata.created,modified: remoteMetadata.modified},
+			ignore);
 	};
 
 	/*
@@ -2375,6 +2399,28 @@ Add the tiddlers of the replies to the wiki
 				modified: util.toTiddlerDate(parts[0].postModified || parts[0].modified)
 			};
 			if(existing) {
+				var ignore = util.LOCAL_IMAGE_FIELDS.slice();
+				if(String(payload.text || "")) {
+				// A copy on the chain is not about the hosted copy: its url
+				// is ignored, see contentIsSame
+					ignore.push(util.IMAGE_URL_FIELD);
+				}
+				// The payload of the local tiddler has the shape of the
+				// payload of the reply: the fields that are not published
+				// are dropped
+				var local = util.getTiddlerPayload(existing);
+				if(sameContent(
+					{title: local.title,text: local.text,fields: local.fields,tags: local.tags,created: payload.created,modified: payload.modified},
+					{title: payload.title,text: payload.text,fields: payload.fields,tags: payload.tags,created: payload.created,modified: payload.modified},
+					ignore)) {
+				// The chain carries the same content as the local tiddler:
+				// the local tiddler is kept, so that a refresh does not
+				// lose the fields of the hosted copy of an image that the
+				// chain does not carry, such as the url of the hosted
+				// copy and the settings of the image
+					summary.skipped++;
+					return;
+				}
 				summary.updated++;
 			} else {
 				summary.added++;
